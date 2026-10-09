@@ -1,0 +1,68 @@
+{
+  "name": "@shin/dsh-git-view",
+  "version": "1.0.0",
+  "description": "Review, stage, commit and push the session repository's git changes from the Harness conversation view.",
+  "license": "Apache-2.0",
+  "author": "shin",
+  "homepage": "https://github.com/shinchen6/dsh-git-view",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shinchen6/dsh-git-view.git"
+  },
+  "bugs": "https://github.com/shinchen6/dsh-git-view/issues",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "git",
+    "diff",
+    "review"
+  ],
+  "icon": "./icon.svg",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "icon.svg",
+    "locale",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE",
+    "screenshots.json"
+  ],
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.0-rc.2"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.0.1-rc.1 <0.1.0 || >=0.1.0-rc.1 <0.2.0-0"
+  }
+}

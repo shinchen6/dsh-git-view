@@ -1,0 +1,7 @@
+# Registers one plugin row. The node half (exports ".") serves repository state
+# through authenticated /api/git.* routes; the browser half (exports "./client")
+# registers the git entry into the conversation view ring at order 20.
+
+- insert:
+    - id: git-view
+      name: '@shin/dsh-git-view'
