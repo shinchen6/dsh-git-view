@@ -10,8 +10,22 @@
  * Run through scripts/build.mjs; not meant to be invoked directly.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const PACKAGE_ID = '@local/dsh-git-view';
+/**
+ * The id the browser half registers under.
+ *
+ * The host composes one client graph row per package and keys it by the `name`
+ * in that package's manifest, then looks the row up by that same name after the
+ * bundle executes. A wrapper that spells anything else registers a factory no
+ * row ever claims, and the row fails with "loaded without registering" instead
+ * of the panel appearing. Read the name from the manifest so the two cannot
+ * drift apart.
+ */
+const PACKAGE_ID = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+).name;
 
 /**
  * Wrap one compiled module body.

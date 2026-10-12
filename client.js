@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: "@local/dsh-git-view",
+  id: "@shin/dsh-git-view",
   factory: (require) => {
     var module = { exports: {} };
 var __defProp = Object.defineProperty;
