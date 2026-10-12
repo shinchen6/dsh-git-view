@@ -1,6 +1,11 @@
 // A declared peer range the running harness cannot satisfy stops the whole
-// plugin from loading, so every peer is checked against the version the local
-// harness actually ships before it is published.
+// plugin from loading ("skipping profile bundle ... is incompatible with dsh").
+//
+// This replicates the harness check exactly, because its shape is easy to get
+// wrong: it compares each peer RANGE against the dsh RUNTIME version (not
+// against the installed version of that package), with prereleases included,
+// and it only looks at peers named "@deepseek-ai/dsh" or "@deepseek-ai/dsh-*".
+// Anything not matching those names is never examined and cannot block startup.
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -8,69 +13,56 @@ import { createRequire } from 'node:module';
 const root = join(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
-/** node_modules roots to resolve against: the profile first, then the dsh install. */
-function roots() {
-  const found = [];
-  if (process.env.DSH_PROFILE_DIR) found.push(join(process.env.DSH_PROFILE_DIR, 'node_modules'));
+/** The dsh installation: the first npx cache entry that carries the runtime. */
+function dshRoot() {
   const cache = join(process.env.LOCALAPPDATA ?? '', 'npm-cache', '_npx');
-  if (existsSync(cache)) {
-    for (const entry of readdirSync(cache)) {
-      const nm = join(cache, entry, 'node_modules');
-      if (existsSync(join(nm, '@deepseek-ai', 'dsh', 'package.json'))) found.push(nm);
-    }
-  }
-  return found;
-}
-
-function versionsOf(name) {
-  const out = [];
-  for (const nm of roots()) {
-    const p = join(nm, name, 'package.json');
-    if (existsSync(p)) out.push([nm, JSON.parse(readFileSync(p, 'utf8')).version]);
-  }
-  return out;
-}
-
-const semver = (() => {
-  for (const nm of roots()) {
-    if (existsSync(join(nm, 'semver', 'package.json'))) {
-      return createRequire(join(nm, 'noop.js'))('semver');
-    }
+  if (!existsSync(cache)) return null;
+  for (const entry of readdirSync(cache)) {
+    const nm = join(cache, entry, 'node_modules');
+    if (existsSync(join(nm, '@deepseek-ai', 'dsh', 'package.json'))) return nm;
   }
   return null;
-})();
+}
+
+const nm = dshRoot();
+if (!nm) {
+  console.log('SKIP: no dsh installation found, cannot check peer ranges');
+  process.exit(0);
+}
+
+const runtimeVersion = JSON.parse(
+  readFileSync(join(nm, '@deepseek-ai', 'dsh', 'package.json'), 'utf8'),
+).version;
+const semver = createRequire(join(nm, 'noop.js'))('semver');
 
 const peers = Object.entries(pkg.peerDependencies ?? {});
 if (peers.length === 0) {
   console.log('no peerDependencies declared');
   process.exit(0);
 }
-if (!semver) {
-  console.log('SKIP: no semver next to a dsh install, cannot verify ranges');
-  process.exit(0);
-}
 
 let failures = 0;
+let examined = 0;
 for (const [name, range] of peers) {
-  const found = versionsOf(name);
-  if (found.length === 0) {
-    console.log(`SKIP ${name}: not installed here, cannot check ${range}`);
+  if (name !== '@deepseek-ai/dsh' && !name.startsWith('@deepseek-ai/dsh-')) {
+    console.log(`n/a  ${name} (never examined by the runtime)`);
     continue;
   }
-  // Every resolvable copy has to satisfy the range: which node_modules the
-  // harness picks first is not something the manifest can rely on.
-  for (const [nm, version] of found) {
-    if (semver.satisfies(version, range)) {
-      console.log(`ok   ${name} ${version} satisfies ${range}`);
-    } else {
-      console.log(`FAIL ${name} ${version} does NOT satisfy ${range}  (${nm})`);
-      failures += 1;
-    }
+  examined += 1;
+  if (semver.satisfies(runtimeVersion, range, { includePrerelease: true })) {
+    console.log(`ok   ${name} accepts runtime ${runtimeVersion}`);
+  } else {
+    console.log(`FAIL ${name} rejects runtime ${runtimeVersion}  (${range})`);
+    failures += 1;
   }
 }
 
+if (examined === 0) {
+  console.log('\nno @deepseek-ai/dsh* peer is declared, so nothing gates startup');
+  process.exit(0);
+}
 if (failures > 0) {
-  console.log(`\n${failures} peer range(s) would stop this plugin from loading.`);
+  console.log(`\n${failures} peer range(s) would make dsh ${runtimeVersion} skip this plugin.`);
   process.exit(1);
 }
-console.log('\nall peer ranges accepted by the local harness');
+console.log(`\ndsh ${runtimeVersion} will load this plugin`);
