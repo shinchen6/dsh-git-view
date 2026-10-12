@@ -1,6 +1,6 @@
 {
   "name": "@shin/dsh-git-view",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Review, stage, commit and push the session repository's git changes from the Harness conversation view.",
   "license": "Apache-2.0",
   "author": "shin",

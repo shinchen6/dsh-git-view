@@ -34,7 +34,13 @@ the same to list as one with twenty.
 Requires dsh 0.2.0-rc.2 or newer, Node 22.19+ or 24+, and a session whose
 working directory is a git repository.
 
+It is in the plugin market. To install it by hand, either path works:
+
 ```sh
+# prebuilt, no build-approval step
+dsh plugin --profile <profile> add https://github.com/shinchen6/dsh-git-view/releases/latest/download/dsh-git-view.tgz
+
+# or build from source
 dsh plugin --profile <profile> add shinchen6/dsh-git-view
 ```
 

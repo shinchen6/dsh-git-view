@@ -29,7 +29,13 @@
 
 需要 dsh 0.2.0-rc.2 或更新版本、Node 22.19+ 或 24+，以及一个工作目录是 git 仓库的会话。
 
+市场里直接能找到它。手动安装的话两条路都行：
+
 ```sh
+# 预构建包，不用再批准构建脚本
+dsh plugin --profile <profile> add https://github.com/shinchen6/dsh-git-view/releases/latest/download/dsh-git-view.tgz
+
+# 或者从源码构建
 dsh plugin --profile <profile> add shinchen6/dsh-git-view
 ```
 
