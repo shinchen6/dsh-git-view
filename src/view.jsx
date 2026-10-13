@@ -329,6 +329,7 @@ export function GitView({ sessionId, useSessionStatus }) {
   // it is one nobody can tell is quiet.
   const [projects, setProjects] = useState(undefined);
   const [summaries, setSummaries] = useState(undefined);
+  const [treeDrawn, setTreeDrawn] = useState(false);
   const [projectPath, setProjectPath] = useState(undefined);
   const [failure, setFailure] = useState(undefined);
   const [loading, setLoading] = useState(true);
@@ -490,7 +491,6 @@ export function GitView({ sessionId, useSessionStatus }) {
   // calls are still in flight.
   useEffect(() => {
     const controller = new AbortController();
-    setSummaries(undefined);
     readRepositories(sessionId, controller.signal)
       .then(answer => {
         setProjects(answer.projects);
@@ -511,13 +511,20 @@ export function GitView({ sessionId, useSessionStatus }) {
     return () => controller.abort();
   }, [sessionId, reload]);
 
-  // The markers, once the list is already on screen. Nothing here blocks the
-  // panel: a project whose answer never arrives keeps its row and is marked as
-  // still being read.
+  // The markers, once the list is on screen and the file tree has stopped
+  // competing for the machine. Thirteen status calls issued alongside the read
+  // that draws the tree are what pushed the summary budget past its deadline
+  // on a wide working directory: measured alone they finish in three to four
+  // seconds, issued together with a tree of several thousand entries only one
+  // had answered by six. Nothing here is on the critical path, so there is no
+  // reason to start it before the thing the panel is actually waiting on.
+  //
+  // A project whose answer never arrives keeps its row, hollow-dotted and
+  // marked as still being read.
   useEffect(() => {
-    if (projects === undefined || projects.length === 0) return undefined;
+    if (!treeDrawn || projects === undefined || projects.length === 0) return undefined;
     const controller = new AbortController();
-    const read = readSummaries(sessionId, controller.signal)
+    readSummaries(sessionId, controller.signal)
       .then(answer => setSummaries(answer.summaries))
       // A failed marker pass leaves every row marked as still being read, which
       // is true: nothing has claimed otherwise.
@@ -525,7 +532,7 @@ export function GitView({ sessionId, useSessionStatus }) {
         if (!controller.signal.aborted) setSummaries([]);
       });
     return () => controller.abort();
-  }, [sessionId, reload, projects]);
+  }, [sessionId, reload, projects, treeDrawn]);
 
   // The session's repository is re-read when the view opens, when asked, and
   // whenever the current project changes.
@@ -534,7 +541,12 @@ export function GitView({ sessionId, useSessionStatus }) {
     setFailure(undefined);
     setLoading(true);
     readStatus(sessionId, projectPath, controller.signal)
-      .then(answer => setStatus(answer))
+      .then(answer => {
+        setStatus(answer);
+        // One latch, never unlatched: the markers wait for the first tree, but
+        // changing project afterwards must not send them back to the start.
+        setTreeDrawn(true);
+      })
       .catch(error => {
         if (controller.signal.aborted) return;
         setStatus(undefined);

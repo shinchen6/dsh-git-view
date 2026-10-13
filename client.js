@@ -2408,6 +2408,7 @@ function GitView({ sessionId, useSessionStatus }) {
   const [status, setStatus] = (0, import_react6.useState)(void 0);
   const [projects, setProjects] = (0, import_react6.useState)(void 0);
   const [summaries, setSummaries] = (0, import_react6.useState)(void 0);
+  const [treeDrawn, setTreeDrawn] = (0, import_react6.useState)(false);
   const [projectPath, setProjectPath] = (0, import_react6.useState)(void 0);
   const [failure, setFailure] = (0, import_react6.useState)(void 0);
   const [loading, setLoading] = (0, import_react6.useState)(true);
@@ -2517,7 +2518,6 @@ function GitView({ sessionId, useSessionStatus }) {
   }, [running]);
   (0, import_react6.useEffect)(() => {
     const controller = new AbortController();
-    setSummaries(void 0);
     readRepositories(sessionId, controller.signal).then((answer) => {
       setProjects(answer.projects);
       setFailure(void 0);
@@ -2532,18 +2532,21 @@ function GitView({ sessionId, useSessionStatus }) {
     return () => controller.abort();
   }, [sessionId, reload]);
   (0, import_react6.useEffect)(() => {
-    if (projects === void 0 || projects.length === 0) return void 0;
+    if (!treeDrawn || projects === void 0 || projects.length === 0) return void 0;
     const controller = new AbortController();
-    const read = readSummaries(sessionId, controller.signal).then((answer) => setSummaries(answer.summaries)).catch((error) => {
+    readSummaries(sessionId, controller.signal).then((answer) => setSummaries(answer.summaries)).catch((error) => {
       if (!controller.signal.aborted) setSummaries([]);
     });
     return () => controller.abort();
-  }, [sessionId, reload, projects]);
+  }, [sessionId, reload, projects, treeDrawn]);
   (0, import_react6.useEffect)(() => {
     const controller = new AbortController();
     setFailure(void 0);
     setLoading(true);
-    readStatus(sessionId, projectPath, controller.signal).then((answer) => setStatus(answer)).catch((error) => {
+    readStatus(sessionId, projectPath, controller.signal).then((answer) => {
+      setStatus(answer);
+      setTreeDrawn(true);
+    }).catch((error) => {
       if (controller.signal.aborted) return;
       setStatus(void 0);
       setFailure(error);

@@ -79,8 +79,17 @@ const REPO_MAX = 50;
  * meant the deadline could fall before the first answer and leave the panel
  * with rows and no state at all. Off the critical path it can afford to be
  * generous; the person is reading a list of names, not waiting on this.
+ *
+ * 12 s, and the margin is measured rather than guessed. Asked on its own the
+ * thirteen finish in three to four seconds, and unbounded fan-out beat every
+ * pool size tried from one to thirteen, so the cost is the work and not the
+ * contention between the thirteen. Asked at the same time as the panel drawing
+ * a tree of several thousand entries, six seconds was not enough for even one
+ * repository to answer. The panel therefore asks for the markers only after the
+ * first tree has drawn, and this is the headroom left for when something else is
+ * busy anyway.
  */
-const REPO_SCAN_BUDGET_MS = 6_000;
+const REPO_SCAN_BUDGET_MS = 12_000;
 
 /** How long a candidate set is reused before the workspace is scanned again. */
 const REPO_VALIDATE_TTL_MS = 10_000;
