@@ -885,21 +885,30 @@ await check('a staged picture previews like any other', async () => {
     await check('repositories one level down are discovered, deeper ones are not', async () => {
       const { status, body } = await call('/api/git.repositories', { sessionId: 's' });
       assert.equal(status, 200);
-      const paths = body.repos.map(entry => entry.path);
+      const paths = body.projects.map(entry => entry.path);
       assert.ok(paths.includes(resolvePath(repo)), 'the enclosing repository is offered');
       assert.ok(paths.includes(near), 'a repository one level down is offered');
       assert.ok(!paths.includes(far), 'a repository two levels down is not offered');
+      for (const entry of body.projects) assert.ok(typeof entry.name === 'string' && entry.name.length > 0);
+    });
+
+    await check('the project list costs no git, so it can carry no state', async () => {
+      // This is the property that keeps the panel off the critical path: listing
+      // thirteen repositories takes milliseconds, summarising them takes seconds.
+      const { body } = await call('/api/git.repositories', { sessionId: 's' });
+      assert.equal(body.summaries, undefined, 'the list reports names, not status');
+      for (const entry of body.projects) assert.equal(entry.staged, undefined);
     });
 
     await check('node_modules is skipped even when it holds a repository', async () => {
       const { body } = await call('/api/git.repositories', { sessionId: 's' });
-      assert.ok(!body.repos.some(entry => entry.path === ignored), 'a vendored repository is not offered');
+      assert.ok(!body.projects.some(entry => entry.path === ignored), 'a vendored repository is not offered');
     });
 
-    await check('a clean repository is still listed, and says it is clean', async () => {
-      const { body } = await call('/api/git.repositories', { sessionId: 's' });
-      const entry = body.repos.find(item => item.path === near);
-      assert.ok(entry, 'the clean repository is present');
+    await check('a clean repository is still listed, and its summary says it is clean', async () => {
+      const { body } = await call('/api/git.summaries', { sessionId: 's' });
+      const entry = body.summaries.find(item => item.path === near);
+      assert.ok(entry, 'the clean repository is summarised');
       assert.equal(entry.branch, 'main');
       assert.equal(entry.clean, true);
       assert.equal(entry.staged, 0);
@@ -908,10 +917,19 @@ await check('a staged picture previews like any other', async () => {
     await check('a repository with staged work is marked as having something to commit', async () => {
       writeFileSync(join(near, 'pending.txt'), 'ready to commit\n');
       execFileSync('git', ['add', 'pending.txt'], { cwd: near });
-      const { body } = await call('/api/git.repositories', { sessionId: 's' });
-      const entry = body.repos.find(item => item.path === near);
+      const { body } = await call('/api/git.summaries', { sessionId: 's' });
+      const entry = body.summaries.find(item => item.path === near);
       assert.equal(entry.clean, false);
       assert.equal(entry.staged, 1, 'the staged file is counted');
+    });
+
+    await check('a repository that cannot answer costs only its own summary', async () => {
+      // The batch shares a deadline. An unreadable candidate must be reported by
+      // name rather than taking the whole answer down with it.
+      const { status, body } = await call('/api/git.summaries', { sessionId: 's' });
+      assert.equal(status, 200);
+      assert.ok(body.summaries.length > 0, 'the readable repositories still answer');
+      assert.ok(Array.isArray(body.unknown), 'and the unreadable ones are named');
     });
 
     await check('naming a discovered repository switches which one is served', async () => {

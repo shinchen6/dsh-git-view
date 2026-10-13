@@ -58,8 +58,21 @@ export class GitError extends Error {
 /** Branch facts and the working-tree file groups. */
 export const readStatus = (sessionId, repo, signal) => get('/api/git.status', scope(sessionId, repo), signal);
 
-/** Every repository this session may point at, each with a summary of its state. */
+/**
+ * Every repository this session may point at, by name.
+ *
+ * Answered from a filesystem scan alone, so the panel can list its projects
+ * without waiting on a single git process.
+ */
 export const readRepositories = (sessionId, signal) => get('/api/git.repositories', { sessionId }, signal);
+
+/**
+ * How much is waiting in each of them.
+ *
+ * Separate from the list because on a wide working directory these take
+ * seconds, and every project is already on screen by then.
+ */
+export const readSummaries = (sessionId, signal) => get('/api/git.summaries', { sessionId }, signal);
 
 /** One file's comparison on the requested side. */
 export const readDiff = (sessionId, path, side, repo, signal) =>

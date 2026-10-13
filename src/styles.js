@@ -242,6 +242,9 @@ export const CSS = `
 .gv-project-dot.changed{background:var(--dsw-alias-label-secondary)}
 .gv-project-dot.ready{background:var(--dsw-alias-accent-base)}
 .gv-project-dot.conflict{background:var(--dsw-alias-state-error-primary)}
+/* Not yet read. Hollow rather than filled: a solid dot reads as a known state,
+   and this one is the absence of one. */
+.gv-project-dot.pending{background:transparent;box-shadow:inset 0 0 0 1px var(--dsw-alias-label-tertiary)}
 .gv-project-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gv-project-branch{flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .gv-project-count{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}

@@ -50,23 +50,32 @@ function projectBranch(entry) {
  * never do.
  *
  * @param {object} props - the layer's props.
- * @param {object[] | undefined} props.projects - summaries, each with a path and counts.
+ * @param {object[] | undefined} props.projects - the discovered projects, each with a path and a name.
+ * @param {object[] | undefined} props.summaries - what is waiting in each, keyed by path.
  * @param {string | undefined} props.current - the project being shown.
  * @param {(path: string) => void} props.onSelect - make a project current.
  * @returns {React.ReactElement | null} the layer, or nothing when there is one project.
  */
-export function ProjectLayer({ projects, current, onSelect }) {
+export function ProjectLayer({ projects, summaries, current, onSelect }) {
   // One project needs no choosing between, and a layer over a single row is a
   // row the user cannot do anything with.
   if (projects === undefined || projects.length < 2) return null;
 
+  const states = new Map((summaries ?? []).map(entry => [entry.path, entry]));
+
   return (
     <div className="gv-projects" role="group" aria-label={t('projects.label')}>
       {projects.map(entry => {
-        const state = entry.conflicts > 0 ? 'conflict'
-          : entry.clean ? 'clean'
-            : entry.staged > 0 ? 'ready'
-              : 'changed';
+        const summary = states.get(entry.path);
+        // A project whose state has not arrived is still a project. Saying
+        // nothing about it would read as "clean" rather than "not yet known",
+        // which is the one thing this layer exists not to get wrong.
+        const pending = summary === undefined;
+        const state = pending ? 'pending'
+          : summary.conflicts > 0 ? 'conflict'
+            : summary.clean ? 'clean'
+              : summary.staged > 0 ? 'ready'
+                : 'changed';
         return (
           <button
             key={entry.path}
@@ -78,8 +87,10 @@ export function ProjectLayer({ projects, current, onSelect }) {
           >
             <span className={`gv-project-dot ${state}`} aria-hidden="true" />
             <span className="gv-project-name">{entry.name}</span>
-            <span className="gv-project-branch">{projectBranch(entry)}</span>
-            <span className="gv-project-count">{entry.clean ? t('projects.clean') : projectCount(entry)}</span>
+            <span className="gv-project-branch">{pending ? '' : projectBranch(summary)}</span>
+            <span className="gv-project-count">
+              {pending ? t('projects.reading') : summary.clean ? t('projects.clean') : projectCount(summary)}
+            </span>
           </button>
         );
       })}

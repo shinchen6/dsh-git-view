@@ -36,6 +36,7 @@ var zh = {
   "projects.label": "\u9879\u76EE",
   "projects.clean": "\u5E72\u51C0",
   "projects.noCommits": "\u5C1A\u65E0\u63D0\u4EA4",
+  "projects.reading": "\u8BFB\u53D6\u4E2D\u2026",
   "projects.detached": "\u6E38\u79BB HEAD",
   "projects.stagedCount": "\u53EF\u63D0\u4EA4 {count}",
   "projects.unstagedCount": "\u5DF2\u6682\u5B58 {count}",
@@ -175,6 +176,7 @@ var en = {
   "projects.label": "Projects",
   "projects.clean": "Clean",
   "projects.noCommits": "No commits yet",
+  "projects.reading": "Reading\u2026",
   "projects.detached": "Detached HEAD",
   "projects.stagedCount": "{count} ready",
   "projects.unstagedCount": "{count} unstaged",
@@ -362,6 +364,7 @@ var GitError = class extends Error {
 };
 var readStatus = (sessionId, repo, signal) => get("/api/git.status", scope(sessionId, repo), signal);
 var readRepositories = (sessionId, signal) => get("/api/git.repositories", { sessionId }, signal);
+var readSummaries = (sessionId, signal) => get("/api/git.summaries", { sessionId }, signal);
 var readDiff = (sessionId, path, side, repo, signal) => get("/api/git.diff", { ...scope(sessionId, repo), path, side }, signal);
 var readUntracked = (sessionId, dir, repo, signal) => get("/api/git.untracked", { ...scope(sessionId, repo), dir }, signal);
 var readFile = (sessionId, path, side, repo, signal) => get("/api/git.file", { ...scope(sessionId, repo), path, side }, signal);
@@ -425,10 +428,13 @@ function projectBranch(entry) {
   if (entry.branch === null || entry.branch === void 0) return t("projects.detached");
   return entry.branch;
 }
-function ProjectLayer({ projects, current, onSelect }) {
+function ProjectLayer({ projects, summaries, current, onSelect }) {
   if (projects === void 0 || projects.length < 2) return null;
+  const states = new Map((summaries ?? []).map((entry) => [entry.path, entry]));
   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "gv-projects", role: "group", "aria-label": t("projects.label"), children: projects.map((entry) => {
-    const state = entry.conflicts > 0 ? "conflict" : entry.clean ? "clean" : entry.staged > 0 ? "ready" : "changed";
+    const summary = states.get(entry.path);
+    const pending = summary === void 0;
+    const state = pending ? "pending" : summary.conflicts > 0 ? "conflict" : summary.clean ? "clean" : summary.staged > 0 ? "ready" : "changed";
     return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
       "button",
       {
@@ -440,8 +446,8 @@ function ProjectLayer({ projects, current, onSelect }) {
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `gv-project-dot ${state}`, "aria-hidden": "true" }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-name", children: entry.name }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-branch", children: projectBranch(entry) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-count", children: entry.clean ? t("projects.clean") : projectCount(entry) })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-branch", children: pending ? "" : projectBranch(summary) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-count", children: pending ? t("projects.reading") : summary.clean ? t("projects.clean") : projectCount(summary) })
         ]
       },
       entry.path
@@ -536,7 +542,7 @@ function RiskGate({ gate, onDismiss, run }) {
     }
   );
 }
-function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, currentProject, onSelectProject }) {
+function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, summaries, currentProject, onSelectProject }) {
   const [drafts, setDrafts] = (0, import_react.useState)(() => /* @__PURE__ */ new Map());
   const key = currentProject ?? "";
   const message = drafts.get(key) ?? "";
@@ -555,7 +561,7 @@ function CommitBar({ staged, busy, generating, problem, run, generateMessage, co
     run({ action: "commit", message: message.trim() });
   };
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ProjectLayer, { projects, current: currentProject, onSelect: onSelectProject }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ProjectLayer, { projects, summaries, current: currentProject, onSelect: onSelectProject }),
     /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: `gv-commit${wide ? " is-open" : ""}`, children: [
       /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-commit-row", children: [
         /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
@@ -2183,6 +2189,9 @@ var CSS = `
 .gv-project-dot.changed{background:var(--dsw-alias-label-secondary)}
 .gv-project-dot.ready{background:var(--dsw-alias-accent-base)}
 .gv-project-dot.conflict{background:var(--dsw-alias-state-error-primary)}
+/* Not yet read. Hollow rather than filled: a solid dot reads as a known state,
+   and this one is the absence of one. */
+.gv-project-dot.pending{background:transparent;box-shadow:inset 0 0 0 1px var(--dsw-alias-label-tertiary)}
 .gv-project-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gv-project-branch{flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .gv-project-count{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
@@ -2398,6 +2407,7 @@ function TreePanel({ status, failure }) {
 function GitView({ sessionId, useSessionStatus }) {
   const [status, setStatus] = (0, import_react6.useState)(void 0);
   const [projects, setProjects] = (0, import_react6.useState)(void 0);
+  const [summaries, setSummaries] = (0, import_react6.useState)(void 0);
   const [projectPath, setProjectPath] = (0, import_react6.useState)(void 0);
   const [failure, setFailure] = (0, import_react6.useState)(void 0);
   const [loading, setLoading] = (0, import_react6.useState)(true);
@@ -2507,11 +2517,12 @@ function GitView({ sessionId, useSessionStatus }) {
   }, [running]);
   (0, import_react6.useEffect)(() => {
     const controller = new AbortController();
+    setSummaries(void 0);
     readRepositories(sessionId, controller.signal).then((answer) => {
-      setProjects(answer.repos);
+      setProjects(answer.projects);
       setFailure(void 0);
       setProjectPath(
-        (current) => current !== void 0 && answer.repos.some((entry) => entry.path === current) ? current : answer.repos[0]?.path ?? void 0
+        (current) => current !== void 0 && answer.projects.some((entry) => entry.path === current) ? current : answer.projects[0]?.path ?? void 0
       );
     }).catch((error) => {
       if (controller.signal.aborted) return;
@@ -2520,6 +2531,14 @@ function GitView({ sessionId, useSessionStatus }) {
     });
     return () => controller.abort();
   }, [sessionId, reload]);
+  (0, import_react6.useEffect)(() => {
+    if (projects === void 0 || projects.length === 0) return void 0;
+    const controller = new AbortController();
+    const read = readSummaries(sessionId, controller.signal).then((answer) => setSummaries(answer.summaries)).catch((error) => {
+      if (!controller.signal.aborted) setSummaries([]);
+    });
+    return () => controller.abort();
+  }, [sessionId, reload, projects]);
   (0, import_react6.useEffect)(() => {
     const controller = new AbortController();
     setFailure(void 0);
@@ -2659,6 +2678,7 @@ function GitView({ sessionId, useSessionStatus }) {
             repo: status.repo,
             projectName: status.repo?.name,
             projects,
+            summaries,
             currentProject: projectPath,
             onSelectProject: setProjectPath
           }

@@ -87,10 +87,17 @@ function render(props) {
   return flatten(ProjectLayer(props));
 }
 
-/** A project summary, with only what the layer reads. */
-const project = (over = {}) => ({
+/**
+ * A discovered project, with only what the list route knows before any git ran.
+ *
+ * Names only, on purpose: what is waiting in the project arrives separately and
+ * later, and the layer has to be useful before it does.
+ */
+const listed = (over = {}) => ({ path: 'D:/w/app', name: 'app', ...over });
+
+/** What is waiting in one project, with only what the layer reads. */
+const summary = (over = {}) => ({
   path: 'D:/w/app',
-  name: 'app',
   branch: 'main',
   unborn: false,
   detached: false,
@@ -131,16 +138,53 @@ function check(name, body) {
 
 try {
   check('a single project needs no layer', () => {
-    assert.equal(ProjectLayer({ projects: [project()], current: 'D:/w/app', onSelect: () => {} }), null);
+    assert.equal(ProjectLayer({ projects: [listed()], current: 'D:/w/app', onSelect: () => {} }), null);
   });
 
   check('an unknown project list renders nothing rather than a broken row', () => {
     assert.equal(ProjectLayer({ projects: undefined, current: undefined, onSelect: () => {} }), null);
   });
 
-  check('every project is listed, including the ones with nothing to do', () => {
+  check('every project is listed before a single summary has arrived', () => {
+    // This is the property that keeps the panel off the critical path: the list
+    // costs a filesystem walk and the summaries cost seconds, and a person
+    // reading a list of names should not be held for the second one.
     const rows = render({
-      projects: [project(), project({ path: 'D:/w/api', name: 'api', clean: true }), project({ path: 'D:/w/web', name: 'web', clean: false, untracked: 3 })],
+      projects: [listed(), listed({ path: 'D:/w/api', name: 'api' }), listed({ path: 'D:/w/web', name: 'web' })],
+      summaries: undefined,
+      current: 'D:/w/app',
+      onSelect: () => {},
+    }).filter(node => node.type === 'button');
+    assert.equal(rows.length, 3, 'every project has a row from the start');
+    for (const row of rows) {
+      assert.ok(textOf(row.props).includes('projects.reading'), 'and says it has not read yet');
+    }
+  });
+
+  check('a project not yet read is not dressed up as a clean one', () => {
+    // The one thing this layer exists not to get wrong: a hollow dot and the
+    // word "reading" must not be read as "nothing is waiting here".
+    const rows = render({
+      projects: [listed(), listed({ path: 'D:/w/api', name: 'api' })],
+      summaries: [summary({ path: 'D:/w/app' })],
+      current: 'D:/w/app',
+      onSelect: () => {},
+    }).filter(node => node.type === 'button');
+    const dot = flatten(rows[1]).find(node => node.props?.className?.startsWith('gv-project-dot'));
+    assert.ok(dot.props.className.includes('pending'), 'the unanswered row is marked pending, not clean');
+    assert.ok(!dot.props.className.includes('clean'));
+    assert.ok(textOf(rows[1].props).includes('projects.reading'));
+  });
+
+  check('every project is listed, including the ones with nothing to do', () => {
+    const projects = [listed(), listed({ path: 'D:/w/api', name: 'api' }), listed({ path: 'D:/w/web', name: 'web' })];
+    const rows = render({
+      projects,
+      summaries: [
+        summary({ path: 'D:/w/app' }),
+        summary({ path: 'D:/w/api', clean: true }),
+        summary({ path: 'D:/w/web', clean: false, untracked: 3 }),
+      ],
       current: 'D:/w/app',
       onSelect: () => {},
     }).filter(node => node.type === 'button');
@@ -151,7 +195,7 @@ try {
 
   check('the current project is the marked one', () => {
     const rows = render({
-      projects: [project({ path: 'D:/w/a', name: 'a' }), project({ path: 'D:/w/b', name: 'b' })],
+      projects: [listed({ path: 'D:/w/a', name: 'a' }), listed({ path: 'D:/w/b', name: 'b' })],
       current: 'D:/w/b',
       onSelect: () => {},
     }).filter(node => node.type === 'button');
@@ -164,43 +208,54 @@ try {
     // git reports the literal string "HEAD" as the branch of a repository with
     // no commits; rendering that raw looks like a broken branch rather than an
     // empty one.
-    const row = render({
-      projects: [project(), project({ path: 'D:/w/new', name: 'new', unborn: true, branch: 'HEAD' })],
+    const rows = render({
+      projects: [listed(), listed({ path: 'D:/w/new', name: 'new' })],
+      summaries: [summary({ path: 'D:/w/app' }), summary({ path: 'D:/w/new', unborn: true, branch: 'HEAD' })],
       current: 'D:/w/app',
       onSelect: () => {},
-    }).filter(node => node.type === 'button')[1];
-    assert.ok(textOf(row.props).includes('projects.noCommits'));
-    assert.ok(!textOf(row.props).includes('HEAD'), 'the literal HEAD never reaches the row');
+    }).filter(node => node.type === 'button');
+    assert.ok(textOf(rows[1].props).includes('projects.noCommits'));
+    assert.ok(!textOf(rows[1].props).includes('HEAD'), 'the literal HEAD never reaches the row');
   });
 
   check('a detached head says so rather than showing nothing', () => {
-    const row = render({
-      projects: [project(), project({ path: 'D:/w/d', name: 'd', detached: true, branch: null })],
+    const rows = render({
+      projects: [listed(), listed({ path: 'D:/w/d', name: 'd' })],
+      summaries: [summary({ path: 'D:/w/app' }), summary({ path: 'D:/w/d', detached: true, branch: null })],
       current: 'D:/w/app',
       onSelect: () => {},
-    }).filter(node => node.type === 'button')[1];
-    assert.ok(textOf(row.props).includes('projects.detached'));
+    }).filter(node => node.type === 'button');
+    assert.ok(textOf(rows[1].props).includes('projects.detached'));
   });
 
   check('staged work is reported as ready, ahead of unstaged', () => {
-    const row = render({
-      projects: [project(), project({ path: 'D:/w/m', name: 'm', clean: false, staged: 3, unstaged: 9 })],
+    const rows = render({
+      projects: [listed(), listed({ path: 'D:/w/m', name: 'm' })],
+      summaries: [
+        summary({ path: 'D:/w/app' }),
+        summary({ path: 'D:/w/m', clean: false, staged: 3, unstaged: 9 }),
+      ],
       current: 'D:/w/app',
       onSelect: () => {},
-    }).filter(node => node.type === 'button')[1];
-    const text = textOf(row.props);
+    }).filter(node => node.type === 'button');
+    const text = textOf(rows[1].props);
     assert.ok(text.includes('projects.stagedCount'), 'the committable count leads');
     assert.ok(!text.includes('projects.unstagedCount'), 'so a commit button beside it is not a lie');
   });
 
   check('a conflict outranks every other count', () => {
-    const row = render({
-      projects: [project(), project({ path: 'D:/w/c', name: 'c', clean: false, staged: 1, conflicts: 2 })],
+    const rows = render({
+      projects: [listed(), listed({ path: 'D:/w/c', name: 'c' })],
+      summaries: [
+        summary({ path: 'D:/w/app' }),
+        summary({ path: 'D:/w/c', clean: false, staged: 1, conflicts: 2 }),
+      ],
       current: 'D:/w/app',
       onSelect: () => {},
-    }).filter(node => node.type === 'button')[1];
-    assert.ok(textOf(row.props).includes('projects.stagedCount'));
-    assert.ok(row.props.className !== undefined);
+    }).filter(node => node.type === 'button');
+    assert.ok(textOf(rows[1].props).includes('projects.stagedCount'));
+    const dot = flatten(rows[1]).find(node => node.props?.className?.startsWith('gv-project-dot'));
+    assert.ok(dot.props.className.includes('conflict'), 'and the dot says a conflict outranks the rest');
   });
 
   check('a project row selects and never stages', () => {
@@ -208,7 +263,7 @@ try {
     // permission to stage across repositories, which no commit ever does.
     let chosen;
     const rows = render({
-      projects: [project(), project({ path: 'D:/w/api', name: 'api' })],
+      projects: [listed(), listed({ path: 'D:/w/api', name: 'api' })],
       current: 'D:/w/app',
       onSelect: path => { chosen = path; },
     }).filter(node => node.type === 'button');
@@ -225,20 +280,25 @@ try {
 
   check('the state dot distinguishes ready from merely changed', () => {
     /** The dot belonging to the second row of a two-project layer. */
-    const dotIn = second => {
+    const dotIn = state => {
       const row = render({
-        projects: [project(), second],
+        // The project must sit at the summary's own path, or the lookup misses
+        // and every row under test reads as pending.
+        projects: [listed(), listed({ path: state.path, name: 'x' })],
+        summaries: [summary({ path: 'D:/w/app' }), state],
         current: 'D:/w/app',
         onSelect: () => {},
       }).filter(node => node.type === 'button')[1];
       return flatten(row).find(node => node.props?.className?.startsWith('gv-project-dot'));
     };
-    const ready = dotIn(project({ path: 'D:/w/r', name: 'r', clean: false, staged: 1 }));
+    const ready = dotIn(summary({ path: 'D:/w/r', clean: false, staged: 1 }));
     assert.ok(ready.props.className.endsWith('ready'), 'staged work is marked committable');
-    const changed = dotIn(project({ path: 'D:/w/u', name: 'u', clean: false, unstaged: 4 }));
-    assert.ok(!changed.props.className.endsWith('ready'), 'working-tree-only work is not');
-    const quiet = dotIn(project({ path: 'D:/w/c', name: 'c' }));
+    const changed = dotIn(summary({ path: 'D:/w/u', clean: false, unstaged: 4 }));
+    assert.ok(changed.props.className.endsWith('changed'), 'working-tree-only work is not committable');
+    const quiet = dotIn(summary({ path: 'D:/w/c' }));
     assert.ok(quiet.props.className.endsWith('clean'), 'a quiet project says so');
+    const clashing = dotIn(summary({ path: 'D:/w/k', clean: false, conflicts: 1 }));
+    assert.ok(clashing.props.className.endsWith('conflict'), 'a conflict outranks everything');
   });
 } finally {
   rmSync(out, { recursive: true, force: true });

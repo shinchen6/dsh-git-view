@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives';
 
 import { CommitBar, PushGate, RiskGate, SelectionBar, useActions } from './actions.jsx';
-import { readDiff, readFile, readRepositories, readStatus, readUntracked } from './api.js';
+import { readDiff, readFile, readRepositories, readStatus, readSummaries, readUntracked } from './api.js';
 import { DiffView, WholeFileView } from './diff.jsx';
 import { FileEditor, FileView, previewKind } from './file.jsx';
 import { useFileHover } from './hover.jsx';
@@ -328,6 +328,7 @@ export function GitView({ sessionId, useSessionStatus }) {
   // list is shown whether or not a project has changes — a project absent from
   // it is one nobody can tell is quiet.
   const [projects, setProjects] = useState(undefined);
+  const [summaries, setSummaries] = useState(undefined);
   const [projectPath, setProjectPath] = useState(undefined);
   const [failure, setFailure] = useState(undefined);
   const [loading, setLoading] = useState(true);
@@ -481,18 +482,25 @@ export function GitView({ sessionId, useSessionStatus }) {
   // The set of projects is read first, because which project is current follows
   // from it; reading the status before knowing the list would briefly show a
   // different repository than the one about to be selected.
+  //
+  // This costs no git at all, so the list appears as soon as the filesystem has
+  // been walked. What each project is waiting on comes afterwards and is slow
+  // on a wide working directory, which is the whole reason it is not asked for
+  // here: a row that names a project beats a blank panel while thirteen status
+  // calls are still in flight.
   useEffect(() => {
     const controller = new AbortController();
+    setSummaries(undefined);
     readRepositories(sessionId, controller.signal)
       .then(answer => {
-        setProjects(answer.repos);
+        setProjects(answer.projects);
         setFailure(undefined);
         // Keep the current project when it survives the scan, so a refresh does
         // not silently move the user back to the enclosing repository.
         setProjectPath(current =>
-          current !== undefined && answer.repos.some(entry => entry.path === current)
+          current !== undefined && answer.projects.some(entry => entry.path === current)
             ? current
-            : (answer.repos[0]?.path ?? undefined),
+            : (answer.projects[0]?.path ?? undefined),
         );
       })
       .catch(error => {
@@ -502,6 +510,22 @@ export function GitView({ sessionId, useSessionStatus }) {
       });
     return () => controller.abort();
   }, [sessionId, reload]);
+
+  // The markers, once the list is already on screen. Nothing here blocks the
+  // panel: a project whose answer never arrives keeps its row and is marked as
+  // still being read.
+  useEffect(() => {
+    if (projects === undefined || projects.length === 0) return undefined;
+    const controller = new AbortController();
+    const read = readSummaries(sessionId, controller.signal)
+      .then(answer => setSummaries(answer.summaries))
+      // A failed marker pass leaves every row marked as still being read, which
+      // is true: nothing has claimed otherwise.
+      .catch(error => {
+        if (!controller.signal.aborted) setSummaries([]);
+      });
+    return () => controller.abort();
+  }, [sessionId, reload, projects]);
 
   // The session's repository is re-read when the view opens, when asked, and
   // whenever the current project changes.
@@ -696,6 +720,7 @@ export function GitView({ sessionId, useSessionStatus }) {
                 // nothing else on screen says which one that is.
                 projectName={status.repo?.name}
                 projects={projects}
+                summaries={summaries}
                 currentProject={projectPath}
                 onSelectProject={setProjectPath}
               />

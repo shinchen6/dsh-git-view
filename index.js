@@ -16,6 +16,8 @@ export const inject = ['connection', 'sessions', 'subprocess', 'fs'];
 const STATUS_PATH = '/api/git.status';
 /** Authenticated GET route listing every repository the session may point at. */
 const REPOSITORIES_PATH = '/api/git.repositories';
+/** Authenticated GET route answering how much is waiting in each of them. */
+const SUMMARIES_PATH = '/api/git.summaries';
 /** Authenticated GET route serving the contents of one untracked directory. */
 const UNTRACKED_PATH = '/api/git.untracked';
 /** Authenticated GET route serving one file's comparison on the requested side. */
@@ -66,12 +68,19 @@ const REPO_SCAN_IGNORED = new Set(['node_modules']);
 const REPO_MAX = 50;
 
 /**
- * The shared deadline for asking every candidate. They are asked in parallel and
- * whatever has not answered by then is reported as unknown rather than holding
- * the panel: a partial answer now beats a complete one after the user has given
- * up. The next refresh fills the rest in.
+ * The shared deadline for asking every candidate how much is waiting in it.
+ *
+ * This budget is deliberately not on the critical path: the panel draws every
+ * project the moment the scan answers, and this only fills in the markers. A
+ * repository that misses the deadline keeps its row and is marked as not yet
+ * answered, so one very large repository costs only its own marker.
+ *
+ * It was 2.5 s against a measured 1.5-3.0 s for thirteen repositories, which
+ * meant the deadline could fall before the first answer and leave the panel
+ * with rows and no state at all. Off the critical path it can afford to be
+ * generous; the person is reading a list of names, not waiting on this.
  */
-const REPO_SCAN_BUDGET_MS = 2_500;
+const REPO_SCAN_BUDGET_MS = 6_000;
 
 /** How long a candidate set is reused before the workspace is scanned again. */
 const REPO_VALIDATE_TTL_MS = 10_000;
@@ -248,10 +257,17 @@ async function resolveRepository(ctx, git, cwd, query, signal) {
 
 /**
  * Each candidate's summary, all asked in parallel under one shared deadline.
+ *
+ * The deadline cancels whatever is still running, but a cancelled call settles
+ * as `unknown` rather than rejecting the batch: one repository too large to
+ * answer costs its own marker and leaves the rest intact. An earlier version
+ * shared one signal across the batch and let it take the whole set down with
+ * it, so a single very large repository could cost every repository its state.
+ *
  * @param {GitRunner} git - command runner.
  * @param {string[]} paths - candidate roots.
  * @param {AbortSignal} signal - cancellation.
- * @returns {Promise<{ repos: object[], unknown: string[] }>} summaries and unanswered paths.
+ * @returns {Promise<{ summaries: object[], unknown: string[] }>} summaries and unanswered paths.
  */
 async function summariseRepositories(git, paths, signal) {
   const deadline = AbortSignal.timeout(REPO_SCAN_BUDGET_MS);
@@ -266,11 +282,9 @@ async function summariseRepositories(git, paths, signal) {
       const { branch, entries } = parsePorcelainV2(result.stdout);
       const summary = {
         path,
-        name: path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path,
         branch: branch.name,
         unborn: branch.unborn,
         detached: branch.detached,
-        oid: branch.oid,
         ahead: branch.ahead,
         behind: branch.behind,
         staged: entries.filter(entry => entry.staged && !entry.conflict).length,
@@ -289,12 +303,12 @@ async function summariseRepositories(git, paths, signal) {
   }));
 
   return {
-    repos: settled.filter(item => item.summary !== null).map(item => item.summary),
+    summaries: settled.filter(item => item.summary !== null).map(item => item.summary),
     unknown: settled.filter(item => item.summary === null).map(item => item.path),
   };
 }
 
-/** Handle `/api/git.repositories`. */
+/** Handle `/api/git.repositories`: the project list, answered before any git runs. */
 async function handleRepositories(ctx, git, request) {
   const query = new URL(request.url).searchParams;
   const session = resolveSession(ctx, query);
@@ -304,9 +318,28 @@ async function handleRepositories(ctx, git, request) {
   // Forced, not cached: this route exists to report what is there now, and a
   // list a repository just created is missing from is worse than a rescan.
   const paths = (await candidatesFor(ctx, git, session.cwd, request.signal, true)).paths;
-  const { repos, unknown } = await summariseRepositories(git, paths, request.signal);
 
-  return json({ cwd: session.cwd, repos, unknown, truncated: paths.length > REPO_MAX });
+  // Names come from the paths themselves. Asking git for each repository's
+  // state here would put a status call per repository in front of the first
+  // paint, and on a wide working directory those take seconds; the markers
+  // arrive separately, so a project is listed from the moment it is found.
+  return json({
+    cwd: session.cwd,
+    projects: paths.map(path => ({ path, name: path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path })),
+    truncated: paths.length > REPO_MAX,
+  });
+}
+
+/** Handle `/api/git.summaries`: how much is waiting in each candidate. */
+async function handleSummaries(ctx, git, request) {
+  const query = new URL(request.url).searchParams;
+  const session = resolveSession(ctx, query);
+  if (session instanceof Response) return session;
+  if ((await git.resolve(request.signal)) === null) return fail('git is not available on this host.', 503);
+
+  const paths = (await candidatesFor(ctx, git, session.cwd, request.signal)).paths;
+  const { summaries, unknown } = await summariseRepositories(git, paths, request.signal);
+  return json({ summaries, unknown });
 }
 
 /**
@@ -1360,6 +1393,7 @@ export function apply(ctx) {
 
   const routes = [
     [REPOSITORIES_PATH, ['GET'], handleRepositories],
+    [SUMMARIES_PATH, ['GET'], handleSummaries],
     [STATUS_PATH, ['GET'], handleStatus],
     [UNTRACKED_PATH, ['GET'], handleUntracked],
     [DIFF_PATH, ['GET'], handleDiff],

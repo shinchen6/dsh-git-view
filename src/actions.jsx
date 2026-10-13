@@ -135,7 +135,7 @@ export function RiskGate({ gate, onDismiss, run }) {
  * @param {object} props - the staged set and the action runner.
  * @returns {React.ReactElement} the bar.
  */
-export function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, currentProject, onSelectProject }) {
+export function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, summaries, currentProject, onSelectProject }) {
   // One draft per project, not one draft for the view: a message half-written
   // for one repository must not be sitting in the box when another is current.
   const [drafts, setDrafts] = useState(() => new Map());
@@ -161,7 +161,7 @@ export function CommitBar({ staged, busy, generating, problem, run, generateMess
 
   return (
     <>
-      <ProjectLayer projects={projects} current={currentProject} onSelect={onSelectProject} />
+      <ProjectLayer projects={projects} summaries={summaries} current={currentProject} onSelect={onSelectProject} />
       <div className={`gv-commit${wide ? ' is-open' : ''}`}>
       <div className="gv-commit-row">
         <textarea
