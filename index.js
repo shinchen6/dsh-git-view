@@ -94,6 +94,16 @@ const REPO_SCAN_BUDGET_MS = 12_000;
 /** How long a candidate set is reused before the workspace is scanned again. */
 const REPO_VALIDATE_TTL_MS = 10_000;
 
+/**
+ * How long one repository's summary is reused.
+ *
+ * Long enough that switching between projects, or refreshing the panel, does
+ * not re-ask thirteen repositories what they were asked seconds ago; short
+ * enough that a change made outside the panel — in a terminal, in another
+ * editor — is picked up without the user having to know to force it.
+ */
+const SUMMARY_TTL_MS = 20_000;
+
 /** The byte text never carries; its presence marks content as binary. */
 const NUL = String.fromCharCode(0);
 
@@ -214,6 +224,16 @@ export function samePath(a, b) {
 const candidateCache = new Map();
 
 /**
+ * One repository's last answer, by root.
+ *
+ * Asking thirteen repositories for their status costs three to four seconds on
+ * a wide working directory, and the panel asks again every time someone picks
+ * a different project. Almost all of that work is repeated within seconds of
+ * the last time, so it is done once and remembered.
+ */
+const summaryCache = new Map();
+
+/**
  * The candidate set, cached so the per-request allowlist check does not rescan
  * the workspace on every status poll.
  * @param {object} ctx - the plugin context.
@@ -278,11 +298,20 @@ async function resolveRepository(ctx, git, cwd, query, signal) {
  * @param {AbortSignal} signal - cancellation.
  * @returns {Promise<{ summaries: object[], unknown: string[] }>} summaries and unanswered paths.
  */
-async function summariseRepositories(git, paths, signal) {
+async function summariseRepositories(git, paths, signal, force = false) {
+  const now = Date.now();
+  const fresh = new Map();
+  const stale = [];
+  for (const path of paths) {
+    const held = force ? undefined : summaryCache.get(path);
+    if (held !== undefined && now - held.at < SUMMARY_TTL_MS) fresh.set(path, held.summary);
+    else stale.push(path);
+  }
+
   const deadline = AbortSignal.timeout(REPO_SCAN_BUDGET_MS);
   const shared = signal === undefined ? deadline : AbortSignal.any([signal, deadline]);
 
-  const settled = await Promise.all(paths.map(async path => {
+  const settled = await Promise.all(stale.map(async path => {
     try {
       const result = await git.ok(
         ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=normal'],
@@ -311,9 +340,23 @@ async function summariseRepositories(git, paths, signal) {
     }
   }));
 
+  // Only answers are remembered. A repository that timed out is the one most
+  // worth asking again, and caching its silence would keep it silent.
+  for (const item of settled) {
+    if (item.summary === null) summaryCache.delete(item.path);
+    else summaryCache.set(item.path, { at: Date.now(), summary: item.summary });
+  }
+
+  const unknown = settled.filter(item => item.summary === null).map(item => item.path);
+
   return {
-    summaries: settled.filter(item => item.summary !== null).map(item => item.summary),
-    unknown: settled.filter(item => item.summary === null).map(item => item.path),
+    summaries: [
+      ...fresh.values(),
+      ...settled.filter(item => item.summary !== null).map(item => item.summary),
+    ],
+    unknown,
+    // Reported so the panel can tell a warm answer from a cold one.
+    cached: fresh.size,
   };
 }
 
@@ -347,8 +390,8 @@ async function handleSummaries(ctx, git, request) {
   if ((await git.resolve(request.signal)) === null) return fail('git is not available on this host.', 503);
 
   const paths = (await candidatesFor(ctx, git, session.cwd, request.signal)).paths;
-  const { summaries, unknown } = await summariseRepositories(git, paths, request.signal);
-  return json({ summaries, unknown });
+  const { summaries, unknown, cached } = await summariseRepositories(git, paths, request.signal);
+  return json({ summaries, unknown, cached });
 }
 
 /**
@@ -1014,6 +1057,9 @@ async function handleWrite(ctx, git, request) {
     return fail(error?.message ?? 'The file could not be written.', 500);
   }
 
+  // Editing a file changes what this repository is waiting on, so its marker
+  // is no longer trustworthy.
+  summaryCache.delete(ready.root);
   return json({ ok: true, path, version: outcome?.version, created: outcome?.created === true });
 }
 
@@ -1260,6 +1306,7 @@ async function handleAction(ctx, git, request) {
       return json({ code: 'pushFailed', message: 'git push failed.', detail: pushed.stderr.trim() }, 409);
     }
     const head = await git.run(['rev-parse', '--short', 'HEAD'], { cwd: ready.root });
+    summaryCache.delete(ready.root);
     return json({ ok: true, head: head.exitCode === 0 ? head.stdout.trim() : undefined, output: pushed.stdout.trim() });
   }
 
@@ -1276,6 +1323,10 @@ async function handleAction(ctx, git, request) {
   }
 
   const head = await git.run(['rev-parse', '--short', 'HEAD'], { cwd: ready.root });
+  // This repository's marker is now wrong, and the panel refreshes the list
+  // immediately: staging a file and still being told the project is clean is
+  // the one way a cached marker can lie.
+  summaryCache.delete(ready.root);
   return json({
     ok: true,
     head: head.exitCode === 0 ? head.stdout.trim() : undefined,

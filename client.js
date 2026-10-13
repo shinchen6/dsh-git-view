@@ -37,6 +37,7 @@ var zh = {
   "projects.clean": "\u5E72\u51C0",
   "projects.noCommits": "\u5C1A\u65E0\u63D0\u4EA4",
   "projects.reading": "\u8BFB\u53D6\u4E2D\u2026",
+  "projects.quietCount": "{count} \u4E2A\u5E72\u51C0\u9879\u76EE",
   "projects.detached": "\u6E38\u79BB HEAD",
   "projects.stagedCount": "\u53EF\u63D0\u4EA4 {count}",
   "projects.unstagedCount": "\u5DF2\u6682\u5B58 {count}",
@@ -177,6 +178,7 @@ var en = {
   "projects.clean": "Clean",
   "projects.noCommits": "No commits yet",
   "projects.reading": "Reading\u2026",
+  "projects.quietCount": "{count} clean projects",
   "projects.detached": "Detached HEAD",
   "projects.stagedCount": "{count} ready",
   "projects.unstagedCount": "{count} unstaged",
@@ -330,12 +332,12 @@ function tOr(key, fallback) {
 }
 
 // src/view.jsx
-var import_react6 = require("react");
+var import_react7 = require("react");
 var import_dsh_client_ui_primitives4 = require("@deepseek-ai/dsh-client-ui-primitives");
 
 // src/actions.jsx
 var import_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-var import_react = require("react");
+var import_react2 = require("react");
 
 // src/api.js
 var NO_STORE = { cache: "no-store" };
@@ -416,6 +418,7 @@ ${parsed.detail}`, status];
 }
 
 // src/projects.jsx
+var import_react = require("react");
 var import_jsx_runtime = require("react/jsx-runtime");
 function projectCount(entry) {
   const ready = entry.staged + entry.conflicts;
@@ -428,42 +431,88 @@ function projectBranch(entry) {
   if (entry.branch === null || entry.branch === void 0) return t("projects.detached");
   return entry.branch;
 }
+function Dot({ state }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `gv-project-dot ${state}`, "aria-hidden": "true" });
+}
+function ProjectRow({ entry, summary, current, onSelect }) {
+  const pending = summary === void 0;
+  const state = pending ? "pending" : summary.conflicts > 0 ? "conflict" : summary.clean ? "clean" : summary.staged > 0 ? "ready" : "changed";
+  const count = pending ? t("projects.reading") : summary.clean ? t("projects.clean") : projectCount(summary);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+    "button",
+    {
+      type: "button",
+      className: `gv-project${current ? " current" : ""}`,
+      "aria-current": current,
+      title: entry.path,
+      onClick: () => onSelect(entry.path),
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Dot, { state }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-name", children: entry.name }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-branch", children: pending ? "" : projectBranch(summary) }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-count", children: count })
+      ]
+    }
+  );
+}
 function ProjectLayer({ projects, summaries, current, onSelect }) {
+  const [showQuiet, setShowQuiet] = (0, import_react.useState)(false);
   if (projects === void 0 || projects.length < 2) return null;
   const states = new Map((summaries ?? []).map((entry) => [entry.path, entry]));
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "gv-projects", role: "group", "aria-label": t("projects.label"), children: projects.map((entry) => {
+  const busy = [];
+  const quiet = [];
+  for (const entry of projects) {
     const summary = states.get(entry.path);
-    const pending = summary === void 0;
-    const state = pending ? "pending" : summary.conflicts > 0 ? "conflict" : summary.clean ? "clean" : summary.staged > 0 ? "ready" : "changed";
-    return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+    if (summary === void 0 || !summary.clean) busy.push(entry);
+    else quiet.push(entry);
+  }
+  const shownQuiet = quiet.filter((entry) => showQuiet || entry.path === current);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "gv-projects", role: "group", "aria-label": t("projects.label"), children: [
+    busy.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      ProjectRow,
+      {
+        entry,
+        summary: states.get(entry.path),
+        current: entry.path === current,
+        onSelect
+      },
+      entry.path
+    )),
+    shownQuiet.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      ProjectRow,
+      {
+        entry,
+        summary: states.get(entry.path),
+        current: entry.path === current,
+        onSelect
+      },
+      entry.path
+    )),
+    quiet.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
       "button",
       {
         type: "button",
-        className: `gv-project${entry.path === current ? " current" : ""}`,
-        "aria-current": entry.path === current,
-        title: entry.path,
-        onClick: () => onSelect(entry.path),
+        className: "gv-project-quiet",
+        "aria-expanded": showQuiet,
+        onClick: () => setShowQuiet((value) => !value),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `gv-project-dot ${state}`, "aria-hidden": "true" }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-name", children: entry.name }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-branch", children: pending ? "" : projectBranch(summary) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-count", children: pending ? t("projects.reading") : summary.clean ? t("projects.clean") : projectCount(summary) })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-caret", "aria-hidden": "true", children: showQuiet ? "\u25BE" : "\u25B8" }),
+          t("projects.quietCount", { count: quiet.length })
         ]
-      },
-      entry.path
-    );
-  }) });
+      }
+    )
+  ] });
 }
 
 // src/actions.jsx
 var import_jsx_runtime2 = require("react/jsx-runtime");
 var GENERATE_TIMEOUT_MS = 6e4;
 function useActions(sessionId, refresh, repo) {
-  const [busy, setBusy] = (0, import_react.useState)(false);
-  const [generating, setGenerating] = (0, import_react.useState)(false);
-  const [problem, setProblem] = (0, import_react.useState)(void 0);
-  const [gate, setGate] = (0, import_react.useState)(void 0);
-  const run = (0, import_react.useCallback)(
+  const [busy, setBusy] = (0, import_react2.useState)(false);
+  const [generating, setGenerating] = (0, import_react2.useState)(false);
+  const [problem, setProblem] = (0, import_react2.useState)(void 0);
+  const [gate, setGate] = (0, import_react2.useState)(void 0);
+  const run = (0, import_react2.useCallback)(
     async (body) => {
       setBusy(true);
       setProblem(void 0);
@@ -480,8 +529,8 @@ function useActions(sessionId, refresh, repo) {
     },
     [sessionId, refresh, repo]
   );
-  const confirm = (0, import_react.useCallback)((title, description, body) => setGate({ title, description, body }), []);
-  const generateMessage = (0, import_react.useCallback)(async () => {
+  const confirm = (0, import_react2.useCallback)((title, description, body) => setGate({ title, description, body }), []);
+  const generateMessage = (0, import_react2.useCallback)(async () => {
     setGenerating(true);
     setProblem(void 0);
     try {
@@ -515,7 +564,7 @@ function useActions(sessionId, refresh, repo) {
   };
 }
 function RiskGate({ gate, onDismiss, run }) {
-  const [acknowledged, setAcknowledged] = (0, import_react.useState)(false);
+  const [acknowledged, setAcknowledged] = (0, import_react2.useState)(false);
   if (gate === void 0) return null;
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
     import_dsh_client_ui_primitives.RiskConfirmation,
@@ -543,7 +592,7 @@ function RiskGate({ gate, onDismiss, run }) {
   );
 }
 function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, summaries, currentProject, onSelectProject }) {
-  const [drafts, setDrafts] = (0, import_react.useState)(() => /* @__PURE__ */ new Map());
+  const [drafts, setDrafts] = (0, import_react2.useState)(() => /* @__PURE__ */ new Map());
   const key = currentProject ?? "";
   const message = drafts.get(key) ?? "";
   const setMessage = (value) => setDrafts((current) => {
@@ -551,7 +600,7 @@ function CommitBar({ staged, busy, generating, problem, run, generateMessage, co
     next.set(key, value);
     return next;
   });
-  const [wide, setWide] = (0, import_react.useState)(false);
+  const [wide, setWide] = (0, import_react2.useState)(false);
   const idle = !busy && !generating;
   const committable = idle && staged.length > 0 && message.trim() !== "";
   const noRemote = repo?.hasRemote === false;
@@ -688,7 +737,7 @@ function PushGate({ gate, onClose, onConfirm }) {
   );
 }
 function RowActions({ file, side, run, confirm }) {
-  const [open, setOpen] = (0, import_react.useState)(false);
+  const [open, setOpen] = (0, import_react2.useState)(false);
   const close = () => setOpen(false);
   const staged = side === "staged";
   const items = staged ? [
@@ -1051,7 +1100,7 @@ function DiffView({ data, split, wrap, whole, added, removed }) {
 
 // src/file.jsx
 var import_dsh_client_ui_primitives2 = require("@deepseek-ai/dsh-client-ui-primitives");
-var import_react2 = require("react");
+var import_react3 = require("react");
 var import_jsx_runtime5 = require("react/jsx-runtime");
 var MARKDOWN = /* @__PURE__ */ new Set(["md", "markdown", "mdx"]);
 var IMAGE = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"]);
@@ -1108,16 +1157,16 @@ function FileView({ data, wrap, path }) {
   ) });
 }
 function FileEditor({ data, path, sessionId, onSaved, repoPath }) {
-  const [buffer, setBuffer] = (0, import_react2.useState)(data?.text ?? "");
-  const [state, setState] = (0, import_react2.useState)("idle");
-  const [problem, setProblem] = (0, import_react2.useState)(void 0);
-  const area = (0, import_react2.useRef)(void 0);
-  (0, import_react2.useEffect)(() => {
+  const [buffer, setBuffer] = (0, import_react3.useState)(data?.text ?? "");
+  const [state, setState] = (0, import_react3.useState)("idle");
+  const [problem, setProblem] = (0, import_react3.useState)(void 0);
+  const area = (0, import_react3.useRef)(void 0);
+  (0, import_react3.useEffect)(() => {
     setBuffer(data?.text ?? "");
     setProblem(void 0);
     setState("idle");
   }, [data, path]);
-  const save = (0, import_react2.useCallback)(async () => {
+  const save = (0, import_react3.useCallback)(async () => {
     if (state === "saving") return;
     setState("saving");
     setProblem(void 0);
@@ -1172,18 +1221,18 @@ function FileEditor({ data, path, sessionId, onSaved, repoPath }) {
 }
 
 // src/hover.jsx
-var import_react3 = require("react");
+var import_react4 = require("react");
 var import_jsx_runtime6 = require("react/jsx-runtime");
 var HOVER_DELAY_MS = 450;
 var MAX_LINES2 = 60;
 function HoverCard({ hover, sessionId, onDismiss }) {
-  const [diff, setDiff] = (0, import_react3.useState)(void 0);
-  const [failed, setFailed] = (0, import_react3.useState)(false);
-  const cardRef = (0, import_react3.useRef)(void 0);
+  const [diff, setDiff] = (0, import_react4.useState)(void 0);
+  const [failed, setFailed] = (0, import_react4.useState)(false);
+  const cardRef = (0, import_react4.useRef)(void 0);
   const target = hover === void 0 ? void 0 : `${hover.side}${hover.file.path}`;
   const targetPath = hover?.file.path;
   const targetSide = hover?.side;
-  (0, import_react3.useEffect)(() => {
+  (0, import_react4.useEffect)(() => {
     if (target === void 0) return void 0;
     let current = true;
     setDiff(void 0);
@@ -1203,7 +1252,7 @@ function HoverCard({ hover, sessionId, onDismiss }) {
       clearTimeout(timer);
     };
   }, [target, targetPath, targetSide, sessionId]);
-  (0, import_react3.useEffect)(() => {
+  (0, import_react4.useEffect)(() => {
     if (hover === void 0) return void 0;
     const onKey = (event) => {
       if (event.key === "Escape") onDismiss();
@@ -1249,16 +1298,16 @@ function HoverCard({ hover, sessionId, onDismiss }) {
   );
 }
 function useFileHover(sessionId) {
-  const [hover, setHover] = (0, import_react3.useState)(void 0);
-  const onEnter = (0, import_react3.useCallback)((file, side, letter, event) => {
+  const [hover, setHover] = (0, import_react4.useState)(void 0);
+  const onEnter = (0, import_react4.useCallback)((file, side, letter, event) => {
     setHover({ file, side, letter, x: event.clientX, y: event.clientY });
   }, []);
-  const onMove = (0, import_react3.useCallback)((event) => {
+  const onMove = (0, import_react4.useCallback)((event) => {
     setHover((current) => current === void 0 ? current : { ...current, x: event.clientX, y: event.clientY });
   }, []);
-  const onLeave = (0, import_react3.useCallback)(() => setHover(void 0), []);
-  const dismiss = (0, import_react3.useCallback)(() => setHover(void 0), []);
-  const bind = (0, import_react3.useCallback)(
+  const onLeave = (0, import_react4.useCallback)(() => setHover(void 0), []);
+  const dismiss = (0, import_react4.useCallback)(() => setHover(void 0), []);
+  const bind = (0, import_react4.useCallback)(
     (file, side, letter) => ({
       onMouseEnter: (event) => onEnter(file, side, letter, event),
       onMouseMove: onMove,
@@ -1276,10 +1325,10 @@ function useFileHover(sessionId) {
 
 // src/repo.jsx
 var import_dsh_client_ui_primitives3 = require("@deepseek-ai/dsh-client-ui-primitives");
-var import_react4 = require("react");
+var import_react5 = require("react");
 var import_jsx_runtime7 = require("react/jsx-runtime");
 function RepoBulkMenu({ status, run, confirm, busy }) {
-  const [open, setOpen] = (0, import_react4.useState)(false);
+  const [open, setOpen] = (0, import_react5.useState)(false);
   const close = () => setOpen(false);
   const unstaged = [...status.unstaged, ...status.conflicts];
   const untracked = status.untracked;
@@ -1380,12 +1429,12 @@ function RemoteActions({ repo, run, busy }) {
   ] });
 }
 function BranchMenu({ sessionId, repo, run, repoPath }) {
-  const [open, setOpen] = (0, import_react4.useState)(false);
-  const [roster, setRoster] = (0, import_react4.useState)(void 0);
-  const [creating, setCreating] = (0, import_react4.useState)(false);
-  const [name, setName] = (0, import_react4.useState)("");
+  const [open, setOpen] = (0, import_react5.useState)(false);
+  const [roster, setRoster] = (0, import_react5.useState)(void 0);
+  const [creating, setCreating] = (0, import_react5.useState)(false);
+  const [name, setName] = (0, import_react5.useState)("");
   const close = () => setOpen(false);
-  (0, import_react4.useEffect)(() => {
+  (0, import_react5.useEffect)(() => {
     if (!open) return void 0;
     const controller = new AbortController();
     setRoster(void 0);
@@ -1506,10 +1555,10 @@ function BranchMenu({ sessionId, repo, run, repoPath }) {
   );
 }
 function StashMenu({ sessionId, run, confirm, repoPath }) {
-  const [open, setOpen] = (0, import_react4.useState)(false);
-  const [stashes, setStashes] = (0, import_react4.useState)(void 0);
+  const [open, setOpen] = (0, import_react5.useState)(false);
+  const [stashes, setStashes] = (0, import_react5.useState)(void 0);
   const close = () => setOpen(false);
-  (0, import_react4.useEffect)(() => {
+  (0, import_react5.useEffect)(() => {
     if (!open) return void 0;
     const controller = new AbortController();
     setStashes(void 0);
@@ -1632,7 +1681,7 @@ function markChanges(hunks) {
 }
 
 // src/tree.jsx
-var import_react5 = require("react");
+var import_react6 = require("react");
 
 // src/treebuild.js
 function buildTree(files) {
@@ -1780,7 +1829,7 @@ function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, act
   const info = expand?.state.get(dir.path);
   const loading = open && wantsContents && info?.loading === true;
   const failed = open && wantsContents && info?.failure !== void 0;
-  (0, import_react5.useEffect)(() => {
+  (0, import_react6.useEffect)(() => {
     if (open && wantsContents && info === void 0) expand?.request(dir.path);
   }, [open, wantsContents, info, dir.path, expand]);
   return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
@@ -2175,27 +2224,31 @@ var CSS = `
 .gv-branch-new{display:flex;gap:6px;padding:6px 10px}
 .gv-stash{border-bottom:1px solid var(--dsw-alias-border-l1)}
 
-/* The project layer sits above the commit bar: a strip of every repository on
-   offer, so which one is current, and which are waiting, is readable without
-   scrolling or clicking. */
-.gv-projects{flex:0 0 auto;max-height:132px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.gv-project{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;border-radius:0;background:none;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;cursor:pointer}
+/* The project layer sits above the commit bar: which repositories are waiting
+   on something, so the answer does not require scrolling or clicking. */
+.gv-projects{flex:0 0 auto;max-height:40%;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.gv-project{display:flex;align-items:center;gap:7px;width:100%;height:22px;padding:0 10px;border:0;border-radius:0;background:none;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:22px;text-align:left;cursor:pointer}
 .gv-project:hover{background:var(--dsw-alias-bg-neutral-hover)}
 .gv-project.current{background:var(--dsw-alias-bg-neutral-active)}
 .gv-project.current .gv-project-name{font-weight:600}
 /* The dot carries the state and the dot alone: four different words beside it
-   would compete with a row that should be readable in one glance. */
-.gv-project-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
+   would compete with a row whose point is to be read in one glance. */
+.gv-project-dot{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
 .gv-project-dot.changed{background:var(--dsw-alias-label-secondary)}
 .gv-project-dot.ready{background:var(--dsw-alias-accent-base)}
 .gv-project-dot.conflict{background:var(--dsw-alias-state-error-primary)}
 /* Not yet read. Hollow rather than filled: a solid dot reads as a known state,
    and this one is the absence of one. */
 .gv-project-dot.pending{background:transparent;box-shadow:inset 0 0 0 1px var(--dsw-alias-label-tertiary)}
-.gv-project-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gv-project-branch{flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
-.gv-project-count{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.gv-project-name{flex:0 1 auto;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gv-project-branch{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.gv-project-count{flex:0 0 auto;margin-left:auto;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .gv-project:focus-visible{outline:2px solid var(--dsw-alias-accent-base);outline-offset:-2px}
+/* The folded remainder. Deliberately not a project row: it is a count, and it
+   must not read as one more repository waiting on something. */
+.gv-project-quiet{display:flex;align-items:center;gap:6px;width:100%;height:22px;padding:0 10px;border:0;border-radius:0;background:none;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:22px;text-align:left;cursor:pointer}
+.gv-project-quiet:hover{background:var(--dsw-alias-bg-neutral-hover);color:var(--dsw-alias-label-primary)}
+.gv-project-caret{flex:0 0 auto;width:9px;font-size:9px;text-align:center}
 `;
 
 // src/view.jsx
@@ -2211,9 +2264,9 @@ var SCOPES = ["whole", "changes", "split"];
 var SCOPE_DEFAULT = "whole";
 var SPLIT_DEFAULT = 0.44;
 function useAvailableHeight() {
-  const self = (0, import_react6.useRef)(void 0);
-  const [room, setRoom] = (0, import_react6.useState)(600);
-  (0, import_react6.useEffect)(() => {
+  const self = (0, import_react7.useRef)(void 0);
+  const [room, setRoom] = (0, import_react7.useState)(600);
+  (0, import_react7.useEffect)(() => {
     const el = self.current;
     if (el === void 0) return void 0;
     const clamp = (value) => Math.min(Math.max(Math.round(value), 220), window.innerHeight - 160);
@@ -2252,7 +2305,7 @@ function useAvailableHeight() {
   return { self, room };
 }
 function useSplit() {
-  const [ratio, setRatio] = (0, import_react6.useState)(() => {
+  const [ratio, setRatio] = (0, import_react7.useState)(() => {
     try {
       const stored = Number(globalThis.localStorage?.getItem(SPLIT_KEY));
       return stored >= SPLIT_MIN && stored <= SPLIT_MAX ? stored : SPLIT_DEFAULT;
@@ -2260,9 +2313,9 @@ function useSplit() {
       return SPLIT_DEFAULT;
     }
   });
-  const body = (0, import_react6.useRef)(void 0);
-  const drag = (0, import_react6.useRef)(void 0);
-  const onPointerDown = (0, import_react6.useCallback)(
+  const body = (0, import_react7.useRef)(void 0);
+  const drag = (0, import_react7.useRef)(void 0);
+  const onPointerDown = (0, import_react7.useCallback)(
     (event) => {
       const start = event.currentTarget;
       start.setPointerCapture(event.pointerId);
@@ -2286,7 +2339,7 @@ function useSplit() {
     },
     []
   );
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     const save = () => {
       try {
         globalThis.localStorage?.setItem(SPLIT_KEY, String(ratio));
@@ -2299,7 +2352,7 @@ function useSplit() {
   return { body, style: { flexBasis: `${ratio * 100}%` }, onPointerDown };
 }
 function useChoice(key, allowed, fallback) {
-  const [value, setValue] = (0, import_react6.useState)(() => {
+  const [value, setValue] = (0, import_react7.useState)(() => {
     try {
       const stored = globalThis.localStorage?.getItem(key);
       return allowed.includes(stored) ? stored : fallback;
@@ -2307,7 +2360,7 @@ function useChoice(key, allowed, fallback) {
       return fallback;
     }
   });
-  const choose = (0, import_react6.useCallback)((next) => {
+  const choose = (0, import_react7.useCallback)((next) => {
     setValue(next);
     try {
       globalThis.localStorage?.setItem(key, next);
@@ -2405,29 +2458,29 @@ function TreePanel({ status, failure }) {
   return null;
 }
 function GitView({ sessionId, useSessionStatus }) {
-  const [status, setStatus] = (0, import_react6.useState)(void 0);
-  const [projects, setProjects] = (0, import_react6.useState)(void 0);
-  const [summaries, setSummaries] = (0, import_react6.useState)(void 0);
-  const [treeDrawn, setTreeDrawn] = (0, import_react6.useState)(false);
-  const [projectPath, setProjectPath] = (0, import_react6.useState)(void 0);
-  const [failure, setFailure] = (0, import_react6.useState)(void 0);
-  const [loading, setLoading] = (0, import_react6.useState)(true);
-  const [reload, setReload] = (0, import_react6.useState)(0);
-  const [selected, setSelected] = (0, import_react6.useState)(void 0);
-  const [diff, setDiff] = (0, import_react6.useState)(void 0);
-  const [file, setFile] = (0, import_react6.useState)(void 0);
-  const [mode, setMode] = (0, import_react6.useState)("diff");
+  const [status, setStatus] = (0, import_react7.useState)(void 0);
+  const [projects, setProjects] = (0, import_react7.useState)(void 0);
+  const [summaries, setSummaries] = (0, import_react7.useState)(void 0);
+  const [treeDrawn, setTreeDrawn] = (0, import_react7.useState)(false);
+  const [projectPath, setProjectPath] = (0, import_react7.useState)(void 0);
+  const [failure, setFailure] = (0, import_react7.useState)(void 0);
+  const [loading, setLoading] = (0, import_react7.useState)(true);
+  const [reload, setReload] = (0, import_react7.useState)(0);
+  const [selected, setSelected] = (0, import_react7.useState)(void 0);
+  const [diff, setDiff] = (0, import_react7.useState)(void 0);
+  const [file, setFile] = (0, import_react7.useState)(void 0);
+  const [mode, setMode] = (0, import_react7.useState)("diff");
   const [scope2, setScope] = useChoice(SCOPE_KEY, SCOPES, SCOPE_DEFAULT);
   const split = scope2 === "split";
-  const [wrap, setWrap] = (0, import_react6.useState)(false);
+  const [wrap, setWrap] = (0, import_react7.useState)(false);
   const columns = useSplit();
   const room = useAvailableHeight();
-  const [collapsed, setCollapsed] = (0, import_react6.useState)(INITIALLY_COLLAPSED);
-  const [pushGate, setPushGate] = (0, import_react6.useState)(void 0);
-  const [opened, setOpened] = (0, import_react6.useState)(() => /* @__PURE__ */ new Map());
-  const pending = (0, import_react6.useRef)([]);
-  (0, import_react6.useEffect)(() => () => pending.current.forEach((controller) => controller.abort()), []);
-  const requestOpen = (0, import_react6.useCallback)(
+  const [collapsed, setCollapsed] = (0, import_react7.useState)(INITIALLY_COLLAPSED);
+  const [pushGate, setPushGate] = (0, import_react7.useState)(void 0);
+  const [opened, setOpened] = (0, import_react7.useState)(() => /* @__PURE__ */ new Map());
+  const pending = (0, import_react7.useRef)([]);
+  (0, import_react7.useEffect)(() => () => pending.current.forEach((controller) => controller.abort()), []);
+  const requestOpen = (0, import_react7.useCallback)(
     (dir) => {
       setOpened((current) => {
         if (current.has(dir)) return current;
@@ -2456,8 +2509,8 @@ function GitView({ sessionId, useSessionStatus }) {
     },
     [sessionId, projectPath]
   );
-  const expand = (0, import_react6.useMemo)(() => ({ state: opened, request: requestOpen }), [opened, requestOpen]);
-  const shown = (0, import_react6.useMemo)(() => {
+  const expand = (0, import_react7.useMemo)(() => ({ state: opened, request: requestOpen }), [opened, requestOpen]);
+  const shown = (0, import_react7.useMemo)(() => {
     if (opened.size === 0 || status === void 0) return status;
     return {
       ...status,
@@ -2468,7 +2521,7 @@ function GitView({ sessionId, useSessionStatus }) {
       })
     };
   }, [status, opened]);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     const shut = (shown?.untracked ?? []).filter((file2) => file2.dir === true).map((file2) => file2.path.replace(/\/+$/, "")).filter((path) => !opened.has(path));
     if (shut.length === 0) return;
     setCollapsed((current) => {
@@ -2484,18 +2537,18 @@ function GitView({ sessionId, useSessionStatus }) {
     });
   }, [shown, opened]);
   const hover = useFileHover(sessionId);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     hover.dismiss();
   }, [status, hover.dismiss]);
-  const [checked, setChecked] = (0, import_react6.useState)(() => /* @__PURE__ */ new Set());
-  const toggleCheck = (0, import_react6.useCallback)((path) => {
+  const [checked, setChecked] = (0, import_react7.useState)(() => /* @__PURE__ */ new Set());
+  const toggleCheck = (0, import_react7.useCallback)((path) => {
     setChecked((current) => {
       const next = new Set(current);
       if (!next.delete(path)) next.add(path);
       return next;
     });
   }, []);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     if (status === void 0 || status.available === false) return;
     const live = new Set([...GROUPS].flatMap((group) => (status[group] ?? []).map((file2) => file2.path)));
     setChecked((current) => {
@@ -2503,7 +2556,7 @@ function GitView({ sessionId, useSessionStatus }) {
       return next.size === current.size ? current : next;
     });
   }, [status]);
-  const checkedFiles = (0, import_react6.useMemo)(
+  const checkedFiles = (0, import_react7.useMemo)(
     () => GROUPS.flatMap((group) => {
       const side = group === "conflicts" ? "unstaged" : group;
       return (status?.[group] ?? []).filter((file2) => checked.has(file2.path)).map((file2) => ({ ...file2, side }));
@@ -2511,12 +2564,12 @@ function GitView({ sessionId, useSessionStatus }) {
     [status, checked]
   );
   const running = useSessionStatus?.((snapshot) => snapshot.get(sessionId)?.running);
-  const wasRunning = (0, import_react6.useRef)(running);
-  (0, import_react6.useEffect)(() => {
+  const wasRunning = (0, import_react7.useRef)(running);
+  (0, import_react7.useEffect)(() => {
     if (wasRunning.current === true && running === false) setReload((value) => value + 1);
     wasRunning.current = running;
   }, [running]);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     const controller = new AbortController();
     readRepositories(sessionId, controller.signal).then((answer) => {
       setProjects(answer.projects);
@@ -2531,7 +2584,7 @@ function GitView({ sessionId, useSessionStatus }) {
     });
     return () => controller.abort();
   }, [sessionId, reload]);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     if (!treeDrawn || projects === void 0 || projects.length === 0) return void 0;
     const controller = new AbortController();
     readSummaries(sessionId, controller.signal).then((answer) => setSummaries(answer.summaries)).catch((error) => {
@@ -2539,7 +2592,7 @@ function GitView({ sessionId, useSessionStatus }) {
     });
     return () => controller.abort();
   }, [sessionId, reload, projects, treeDrawn]);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     const controller = new AbortController();
     setFailure(void 0);
     setLoading(true);
@@ -2555,7 +2608,7 @@ function GitView({ sessionId, useSessionStatus }) {
     });
     return () => controller.abort();
   }, [sessionId, projectPath, reload]);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     if (selected === void 0 || status === void 0 || status.available === false) return;
     const stillThere = (status[selected.side] ?? []).some((file2) => file2.path === selected.path);
     if (stillThere) return;
@@ -2563,7 +2616,7 @@ function GitView({ sessionId, useSessionStatus }) {
     if (side === void 0) setSelected(void 0);
     else setSelected((current) => current === void 0 ? current : { ...current, side });
   }, [status, selected]);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     if (selected === void 0) {
       setDiff(void 0);
       return void 0;
@@ -2576,9 +2629,9 @@ function GitView({ sessionId, useSessionStatus }) {
     });
     return () => controller.abort();
   }, [sessionId, selected, projectPath]);
-  const fileKey = (0, import_react6.useRef)(void 0);
+  const fileKey = (0, import_react7.useRef)(void 0);
   const needsText = selected !== void 0 && (mode === "file" || mode === "edit" || mode === "diff" && scope2 === "whole");
-  (0, import_react6.useEffect)(() => {
+  (0, import_react7.useEffect)(() => {
     if (selected === void 0) {
       fileKey.current = void 0;
       setFile(void 0);
@@ -2596,8 +2649,8 @@ function GitView({ sessionId, useSessionStatus }) {
     });
     return () => controller.abort();
   }, [sessionId, selected, needsText, reload, projectPath]);
-  const [generateGate, setGenerateGate] = (0, import_react6.useState)(void 0);
-  const confirmGenerate = (0, import_react6.useCallback)(async (make) => {
+  const [generateGate, setGenerateGate] = (0, import_react7.useState)(void 0);
+  const confirmGenerate = (0, import_react7.useCallback)(async (make) => {
     setGenerateGate({
       title: t("commit.replaceTitle"),
       description: t("commit.replaceBody"),
@@ -2608,33 +2661,33 @@ function GitView({ sessionId, useSessionStatus }) {
     });
     return void 0;
   }, []);
-  const toggleGroup = (0, import_react6.useCallback)((key) => {
+  const toggleGroup = (0, import_react7.useCallback)((key) => {
     setCollapsed((previous) => {
       const next = new Set(previous);
       if (!next.delete(key)) next.add(key);
       return next;
     });
   }, []);
-  const toggleDir = (0, import_react6.useCallback)((key) => {
+  const toggleDir = (0, import_react7.useCallback)((key) => {
     setCollapsed((previous) => {
       const next = new Set(previous);
       if (!next.delete(key)) next.add(key);
       return next;
     });
   }, []);
-  const reloadStatus = (0, import_react6.useCallback)(
+  const reloadStatus = (0, import_react7.useCallback)(
     () => readStatus(sessionId, projectPath).then((answer) => {
       setStatus(answer);
       setFailure(void 0);
     }).catch((error) => setFailure(error)),
     [sessionId, projectPath]
   );
-  const refreshAll = (0, import_react6.useCallback)(() => {
+  const refreshAll = (0, import_react7.useCallback)(() => {
     setReload((value) => value + 1);
   }, []);
   const actions = useActions(sessionId, reloadStatus, projectPath);
   const { run, confirm, gate, dismiss, busy, generating, generateMessage, problem } = actions;
-  const move = (0, import_react6.useCallback)(
+  const move = (0, import_react7.useCallback)(
     (step) => {
       if (status?.available !== true) return;
       const order = visibleOrder(shown, collapsed);

@@ -228,25 +228,29 @@ export const CSS = `
 .gv-branch-new{display:flex;gap:6px;padding:6px 10px}
 .gv-stash{border-bottom:1px solid var(--dsw-alias-border-l1)}
 
-/* The project layer sits above the commit bar: a strip of every repository on
-   offer, so which one is current, and which are waiting, is readable without
-   scrolling or clicking. */
-.gv-projects{flex:0 0 auto;max-height:132px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l1)}
-.gv-project{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;border-radius:0;background:none;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;cursor:pointer}
+/* The project layer sits above the commit bar: which repositories are waiting
+   on something, so the answer does not require scrolling or clicking. */
+.gv-projects{flex:0 0 auto;max-height:40%;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.gv-project{display:flex;align-items:center;gap:7px;width:100%;height:22px;padding:0 10px;border:0;border-radius:0;background:none;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:22px;text-align:left;cursor:pointer}
 .gv-project:hover{background:var(--dsw-alias-bg-neutral-hover)}
 .gv-project.current{background:var(--dsw-alias-bg-neutral-active)}
 .gv-project.current .gv-project-name{font-weight:600}
 /* The dot carries the state and the dot alone: four different words beside it
-   would compete with a row that should be readable in one glance. */
-.gv-project-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
+   would compete with a row whose point is to be read in one glance. */
+.gv-project-dot{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
 .gv-project-dot.changed{background:var(--dsw-alias-label-secondary)}
 .gv-project-dot.ready{background:var(--dsw-alias-accent-base)}
 .gv-project-dot.conflict{background:var(--dsw-alias-state-error-primary)}
 /* Not yet read. Hollow rather than filled: a solid dot reads as a known state,
    and this one is the absence of one. */
 .gv-project-dot.pending{background:transparent;box-shadow:inset 0 0 0 1px var(--dsw-alias-label-tertiary)}
-.gv-project-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gv-project-branch{flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
-.gv-project-count{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.gv-project-name{flex:0 1 auto;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gv-project-branch{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.gv-project-count{flex:0 0 auto;margin-left:auto;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .gv-project:focus-visible{outline:2px solid var(--dsw-alias-accent-base);outline-offset:-2px}
+/* The folded remainder. Deliberately not a project row: it is a count, and it
+   must not read as one more repository waiting on something. */
+.gv-project-quiet{display:flex;align-items:center;gap:6px;width:100%;height:22px;padding:0 10px;border:0;border-radius:0;background:none;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:22px;text-align:left;cursor:pointer}
+.gv-project-quiet:hover{background:var(--dsw-alias-bg-neutral-hover);color:var(--dsw-alias-label-primary)}
+.gv-project-caret{flex:0 0 auto;width:9px;font-size:9px;text-align:center}
 `;

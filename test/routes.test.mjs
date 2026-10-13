@@ -29,10 +29,25 @@ const gitPath = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which
   .split(/\r?\n/)[0]
   .trim();
 
+/** Every git invocation the routes made, so caching is observable rather than assumed. */
+const gitCalls = [];
+
+/**
+ * How many status scans the routes have run.
+ *
+ * Matched on the whole recorded command line: the first argument is the git
+ * executable's path, so a prefix test against `status` never matches anything
+ * and would let a cache test pass without a single call being counted.
+ *
+ * @returns {number} the number of status invocations so far.
+ */
+const statusCalls = () => gitCalls.filter(line => /(^|\s)status --porcelain=v2/.test(line)).length;
+
 /** The subprocess capability, backed by real git through spawnSync. */
 const subprocess = {
   resolveExecutable: () => Promise.resolve(gitPath),
   spawn(spec) {
+    gitCalls.push(spec.argv.join(' '));
     const result = spawnSync(spec.argv[0], spec.argv.slice(1), {
       cwd: spec.cwd,
       env: { ...process.env, ...spec.env },
@@ -175,6 +190,33 @@ function post(body) {
   return route
     .fetch(
       new Request('http://127.0.0.1/api/git.action?sessionId=s', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    )
+    .then(async response => {
+      const text = await response.text();
+      assert.equal(response.status, 200, `${JSON.stringify(body)} answered ${response.status}: ${text}`);
+      return JSON.parse(text);
+    });
+}
+
+/**
+ * Run one action against a named repository, the way the browser would.
+ *
+ * `post` always addresses the enclosing repository; this is for the nested ones,
+ * whose cache entry is keyed by their own root.
+ *
+ * @param {string} repo - the repository root to act on.
+ * @param {object} body - the action body.
+ * @returns {Promise<any>} the decoded answer.
+ */
+function postIn(repo, body) {
+  const route = routes.get('/api/git.action');
+  const query = new URLSearchParams({ sessionId: 's', repo });
+  return route
+    .fetch(
+      new Request(`http://127.0.0.1/api/git.action?${query}`, {
         method: 'POST',
         body: JSON.stringify(body),
       }),
@@ -915,8 +957,11 @@ await check('a staged picture previews like any other', async () => {
     });
 
     await check('a repository with staged work is marked as having something to commit', async () => {
+      // Staged through the route rather than behind its back: a change made
+      // outside the panel is exactly what the cache TTL is for, and this case is
+      // about the marker, not about the TTL.
       writeFileSync(join(near, 'pending.txt'), 'ready to commit\n');
-      execFileSync('git', ['add', 'pending.txt'], { cwd: near });
+      await postIn(near, { action: 'stage', paths: ['pending.txt'] });
       const { body } = await call('/api/git.summaries', { sessionId: 's' });
       const entry = body.summaries.find(item => item.path === near);
       assert.equal(entry.clean, false);
@@ -930,6 +975,30 @@ await check('a staged picture previews like any other', async () => {
       assert.equal(status, 200);
       assert.ok(body.summaries.length > 0, 'the readable repositories still answer');
       assert.ok(Array.isArray(body.unknown), 'and the unreadable ones are named');
+    });
+
+    await check('asking twice costs one set of status calls', async () => {
+      // The panel asks again every time someone picks a different project, and
+      // on a wide working directory that is seconds of repeated work.
+      await call('/api/git.summaries', { sessionId: 's' });
+      const before = statusCalls();
+      assert.ok(before > 0, 'the first answer really did run status');
+      const { body } = await call('/api/git.summaries', { sessionId: 's' });
+      assert.equal(statusCalls(), before, 'the second answer costs no status calls');
+      assert.equal(body.cached, body.summaries.length, 'and is reported as answered from cache');
+    });
+
+    await check('staging something drops that repository from the cache', async () => {
+      // A cached marker that outlives the change it describes is the one way
+      // caching here can tell a lie.
+      await call('/api/git.summaries', { sessionId: 's' });
+      const before = statusCalls();
+      writeFileSync(join(near, 'fresh.txt'), 'just written\n');
+      await postIn(near, { action: 'stage', paths: ['fresh.txt'] });
+      const { body } = await call('/api/git.summaries', { sessionId: 's' });
+      assert.ok(statusCalls() > before, 'the repository that changed is asked again');
+      const entry = body.summaries.find(item => item.path === near);
+      assert.ok(entry.staged >= 1, 'and its answer reflects the change');
     });
 
     await check('naming a discovered repository switches which one is served', async () => {
