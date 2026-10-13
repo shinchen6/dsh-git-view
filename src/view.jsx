@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives';
 
 import { CommitBar, PushGate, RiskGate, SelectionBar, useActions } from './actions.jsx';
-import { readDiff, readFile, readStatus, readUntracked } from './api.js';
+import { readDiff, readFile, readRepositories, readStatus, readUntracked } from './api.js';
 import { DiffView, WholeFileView } from './diff.jsx';
 import { FileEditor, FileView, previewKind } from './file.jsx';
 import { useFileHover } from './hover.jsx';
@@ -194,18 +194,18 @@ function useChoice(key, allowed, fallback) {
  * The repository header: its name, its branch, how far ahead and behind that
  * branch is, and the controls that reach git.
  */
-function RepoHeader({ status, onRefresh, sessionId, run, confirm, busy, loading }) {
+function RepoHeader({ status, onRefresh, sessionId, run, confirm, busy, loading, repoPath }) {
   const repo = status.repo;
   return (
     <div className="gv-head">
       <span className="gv-repo" title={repo.root}>
         {repo.name}
       </span>
-      <BranchMenu sessionId={sessionId} repo={repo} run={run} />
+      <BranchMenu sessionId={sessionId} repo={repo} run={run} repoPath={repoPath} />
       {repo.ahead > 0 ? <span className="gv-count">↑{repo.ahead}</span> : null}
       {repo.behind > 0 ? <span className="gv-count">↓{repo.behind}</span> : null}
       <span className="gv-spacer" />
-      <StashMenu sessionId={sessionId} run={run} confirm={confirm} />
+      <StashMenu sessionId={sessionId} run={run} confirm={confirm} repoPath={repoPath} />
       <button
         type="button"
         className="gv-btn"
@@ -324,6 +324,11 @@ function TreePanel({ status, failure }) {
  */
 export function GitView({ sessionId, useSessionStatus }) {
   const [status, setStatus] = useState(undefined);
+  // Every project the working directory offers, each with its own summary. The
+  // list is shown whether or not a project has changes — a project absent from
+  // it is one nobody can tell is quiet.
+  const [projects, setProjects] = useState(undefined);
+  const [projectPath, setProjectPath] = useState(undefined);
   const [failure, setFailure] = useState(undefined);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
@@ -361,7 +366,7 @@ export function GitView({ sessionId, useSessionStatus }) {
       pending.current.push(controller);
       // The trailing slash marks a directory; the route refuses anything else.
       // The `opened` key stays slash-less: it is a node path, not a pathspec.
-      readUntracked(sessionId, `${dir}/`, controller.signal)
+      readUntracked(sessionId, `${dir}/`, projectPath, controller.signal)
         .then(answer =>
           setOpened(current => {
             const next = new Map(current);
@@ -381,7 +386,7 @@ export function GitView({ sessionId, useSessionStatus }) {
           pending.current = pending.current.filter(one => one !== controller);
         });
     },
-    [sessionId],
+    [sessionId, projectPath],
   );
   const expand = useMemo(() => ({ state: opened, request: requestOpen }), [opened, requestOpen]);
 
@@ -473,12 +478,38 @@ export function GitView({ sessionId, useSessionStatus }) {
     wasRunning.current = running;
   }, [running]);
 
-  // The session's repository is re-read when the view opens and when asked.
+  // The set of projects is read first, because which project is current follows
+  // from it; reading the status before knowing the list would briefly show a
+  // different repository than the one about to be selected.
+  useEffect(() => {
+    const controller = new AbortController();
+    readRepositories(sessionId, controller.signal)
+      .then(answer => {
+        setProjects(answer.repos);
+        setFailure(undefined);
+        // Keep the current project when it survives the scan, so a refresh does
+        // not silently move the user back to the enclosing repository.
+        setProjectPath(current =>
+          current !== undefined && answer.repos.some(entry => entry.path === current)
+            ? current
+            : (answer.repos[0]?.path ?? undefined),
+        );
+      })
+      .catch(error => {
+        if (controller.signal.aborted) return;
+        setProjects([]);
+        setFailure(error);
+      });
+    return () => controller.abort();
+  }, [sessionId, reload]);
+
+  // The session's repository is re-read when the view opens, when asked, and
+  // whenever the current project changes.
   useEffect(() => {
     const controller = new AbortController();
     setFailure(undefined);
     setLoading(true);
-    readStatus(sessionId, controller.signal)
+    readStatus(sessionId, projectPath, controller.signal)
       .then(answer => setStatus(answer))
       .catch(error => {
         if (controller.signal.aborted) return;
@@ -489,7 +520,7 @@ export function GitView({ sessionId, useSessionStatus }) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [sessionId, reload]);
+  }, [sessionId, projectPath, reload]);
 
   // A refresh can move a file between groups, so the selection's side is
   // re-resolved against the fresh status: the selection follows the file, and
@@ -515,14 +546,14 @@ export function GitView({ sessionId, useSessionStatus }) {
     }
     const controller = new AbortController();
     setDiff(undefined);
-    readDiff(sessionId, selected.path, selected.side, controller.signal)
+    readDiff(sessionId, selected.path, selected.side, projectPath, controller.signal)
       .then(answer => setDiff(answer))
       .catch(error => {
         if (controller.signal.aborted) return;
         setDiff({ kind: 'error', message: error.message });
       });
     return () => controller.abort();
-  }, [sessionId, selected]);
+  }, [sessionId, selected, projectPath]);
 
   // The whole-file answer is read on demand and kept while a view still wants it:
   // one fetch serves all three views, so moving between them never re-reads the
@@ -539,19 +570,19 @@ export function GitView({ sessionId, useSessionStatus }) {
       return undefined;
     }
     if (!needsText) return undefined;
-    const key = `${selected.side}:${selected.path}#${reload}`;
+    const key = `${projectPath ?? ''}:${selected.side}:${selected.path}#${reload}`;
     if (fileKey.current === key) return undefined;
     const controller = new AbortController();
     fileKey.current = key;
     setFile(undefined);
-    readFile(sessionId, selected.path, FILE_SIDE[selected.side] ?? 'worktree', controller.signal)
+    readFile(sessionId, selected.path, FILE_SIDE[selected.side] ?? 'worktree', projectPath, controller.signal)
       .then(answer => setFile(answer))
       .catch(error => {
         if (controller.signal.aborted) return;
         setFile({ kind: 'error', message: error.message });
       });
     return () => controller.abort();
-  }, [sessionId, selected, needsText, reload]);
+  }, [sessionId, selected, needsText, reload, projectPath]);
 
   // Generating over a message the user already typed replaces it, so it takes
   // the gate rather than running on its own.
@@ -586,16 +617,22 @@ export function GitView({ sessionId, useSessionStatus }) {
 
   const reloadStatus = useCallback(
     () =>
-      readStatus(sessionId)
+      readStatus(sessionId, projectPath)
         .then(answer => {
           setStatus(answer);
           setFailure(undefined);
         })
         .catch(error => setFailure(error)),
-    [sessionId],
+    [sessionId, projectPath],
   );
 
-  const actions = useActions(sessionId, reloadStatus);
+  // A refresh also re-reads the project list, so a repository created since the
+  // view opened appears without the panel having to be reopened.
+  const refreshAll = useCallback(() => {
+    setReload(value => value + 1);
+  }, []);
+
+  const actions = useActions(sessionId, reloadStatus, projectPath);
   const { run, confirm, gate, dismiss, busy, generating, generateMessage, problem } = actions;
 
   /**
@@ -625,12 +662,13 @@ export function GitView({ sessionId, useSessionStatus }) {
       {status?.available === true && failure === undefined ? (
         <RepoHeader
           status={status}
-          onRefresh={() => setReload(value => value + 1)}
+          onRefresh={refreshAll}
           sessionId={sessionId}
           run={run}
           confirm={confirm}
           busy={busy}
           loading={loading}
+          repoPath={projectPath}
         />
       ) : (
         <div className="gv-head">
@@ -654,6 +692,12 @@ export function GitView({ sessionId, useSessionStatus }) {
                 confirmGenerate={confirmGenerate}
                 confirmPush={() => setPushGate({ repo: status.repo })}
                 repo={status.repo}
+                // Named here because the commit lands in the current project and
+                // nothing else on screen says which one that is.
+                projectName={status.repo?.name}
+                projects={projects}
+                currentProject={projectPath}
+                onSelectProject={setProjectPath}
               />
               <div
                 className="gv-tree-scroll"
@@ -729,6 +773,7 @@ export function GitView({ sessionId, useSessionStatus }) {
                     data={file}
                     path={selected.path}
                     sessionId={sessionId}
+                    repoPath={projectPath}
                     onSaved={() => setReload(value => value + 1)}
                   />
                 ) : (

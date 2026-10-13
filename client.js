@@ -33,6 +33,13 @@ var NS = "gitView";
 var zh = {
   "view.git": "Git",
   "view.resize": "\u8C03\u6574\u6587\u4EF6\u5217\u8868\u5BBD\u5EA6",
+  "projects.label": "\u9879\u76EE",
+  "projects.clean": "\u5E72\u51C0",
+  "projects.noCommits": "\u5C1A\u65E0\u63D0\u4EA4",
+  "projects.detached": "\u6E38\u79BB HEAD",
+  "projects.stagedCount": "\u53EF\u63D0\u4EA4 {count}",
+  "projects.unstagedCount": "\u5DF2\u6682\u5B58 {count}",
+  "projects.untrackedCount": "\u5DF2\u6682\u5B58 0 \xB7 \u672A\u8DDF\u8E2A {count}",
   "group.conflicts": "\u51B2\u7A81",
   "group.staged": "\u6682\u5B58\u7684\u66F4\u6539",
   "group.unstaged": "\u66F4\u6539",
@@ -165,6 +172,13 @@ var zh = {
 var en = {
   "view.git": "Git",
   "view.resize": "\u8C03\u6574\u6587\u4EF6\u5217\u8868\u5BBD\u5EA6",
+  "projects.label": "Projects",
+  "projects.clean": "Clean",
+  "projects.noCommits": "No commits yet",
+  "projects.detached": "Detached HEAD",
+  "projects.stagedCount": "{count} ready",
+  "projects.unstagedCount": "{count} unstaged",
+  "projects.untrackedCount": "0 staged \xB7 {count} untracked",
   "group.conflicts": "Conflicts",
   "group.staged": "Staged Changes",
   "group.unstaged": "Changes",
@@ -323,6 +337,7 @@ var import_react = require("react");
 
 // src/api.js
 var NO_STORE = { cache: "no-store" };
+var scope = (sessionId, repo) => repo === void 0 ? { sessionId } : { sessionId, repo };
 async function get(path, params, signal) {
   const query = new URLSearchParams(params);
   const response = await fetch(`${path}?${query}`, { ...NO_STORE, signal });
@@ -345,12 +360,13 @@ var GitError = class extends Error {
     this.status = status;
   }
 };
-var readStatus = (sessionId, signal) => get("/api/git.status", { sessionId }, signal);
-var readDiff = (sessionId, path, side, signal) => get("/api/git.diff", { sessionId, path, side }, signal);
-var readUntracked = (sessionId, dir, signal) => get("/api/git.untracked", { sessionId, dir }, signal);
-var readFile = (sessionId, path, side, signal) => get("/api/git.file", { sessionId, path, side }, signal);
-async function writeFile(sessionId, path, content, version) {
-  const response = await fetch(`/api/git.write?sessionId=${encodeURIComponent(sessionId)}`, {
+var readStatus = (sessionId, repo, signal) => get("/api/git.status", scope(sessionId, repo), signal);
+var readRepositories = (sessionId, signal) => get("/api/git.repositories", { sessionId }, signal);
+var readDiff = (sessionId, path, side, repo, signal) => get("/api/git.diff", { ...scope(sessionId, repo), path, side }, signal);
+var readUntracked = (sessionId, dir, repo, signal) => get("/api/git.untracked", { ...scope(sessionId, repo), dir }, signal);
+var readFile = (sessionId, path, side, repo, signal) => get("/api/git.file", { ...scope(sessionId, repo), path, side }, signal);
+async function writeFile(sessionId, path, content, version, repo) {
+  const response = await fetch(`/api/git.write?${new URLSearchParams(scope(sessionId, repo))}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     ...NO_STORE,
@@ -364,10 +380,10 @@ async function writeFile(sessionId, path, content, version) {
     return { ok: true };
   }
 }
-var readBranches = (sessionId, signal) => get("/api/git.branches", { sessionId }, signal);
-var readStashes = (sessionId, signal) => get("/api/git.stashes", { sessionId }, signal);
-async function postAction(sessionId, body, signal) {
-  const response = await fetch(`/api/git.action?sessionId=${encodeURIComponent(sessionId)}`, {
+var readBranches = (sessionId, repo, signal) => get("/api/git.branches", scope(sessionId, repo), signal);
+var readStashes = (sessionId, repo, signal) => get("/api/git.stashes", scope(sessionId, repo), signal);
+async function postAction(sessionId, body, repo, signal) {
+  const response = await fetch(`/api/git.action?${new URLSearchParams(scope(sessionId, repo))}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     ...NO_STORE,
@@ -396,10 +412,47 @@ ${parsed.detail}`, status];
   return [text || `${status}`, status];
 }
 
-// src/actions.jsx
+// src/projects.jsx
 var import_jsx_runtime = require("react/jsx-runtime");
+function projectCount(entry) {
+  const ready = entry.staged + entry.conflicts;
+  if (ready > 0) return t("projects.stagedCount", { count: ready });
+  if (entry.unstaged > 0) return t("projects.unstagedCount", { count: entry.unstaged });
+  return t("projects.untrackedCount", { count: entry.untracked });
+}
+function projectBranch(entry) {
+  if (entry.unborn === true) return t("projects.noCommits");
+  if (entry.branch === null || entry.branch === void 0) return t("projects.detached");
+  return entry.branch;
+}
+function ProjectLayer({ projects, current, onSelect }) {
+  if (projects === void 0 || projects.length < 2) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "gv-projects", role: "group", "aria-label": t("projects.label"), children: projects.map((entry) => {
+    const state = entry.conflicts > 0 ? "conflict" : entry.clean ? "clean" : entry.staged > 0 ? "ready" : "changed";
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+      "button",
+      {
+        type: "button",
+        className: `gv-project${entry.path === current ? " current" : ""}`,
+        "aria-current": entry.path === current,
+        title: entry.path,
+        onClick: () => onSelect(entry.path),
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `gv-project-dot ${state}`, "aria-hidden": "true" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-name", children: entry.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-branch", children: projectBranch(entry) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-project-count", children: entry.clean ? t("projects.clean") : projectCount(entry) })
+        ]
+      },
+      entry.path
+    );
+  }) });
+}
+
+// src/actions.jsx
+var import_jsx_runtime2 = require("react/jsx-runtime");
 var GENERATE_TIMEOUT_MS = 6e4;
-function useActions(sessionId, refresh) {
+function useActions(sessionId, refresh, repo) {
   const [busy, setBusy] = (0, import_react.useState)(false);
   const [generating, setGenerating] = (0, import_react.useState)(false);
   const [problem, setProblem] = (0, import_react.useState)(void 0);
@@ -409,7 +462,7 @@ function useActions(sessionId, refresh) {
       setBusy(true);
       setProblem(void 0);
       try {
-        const answer = await postAction(sessionId, body);
+        const answer = await postAction(sessionId, body, repo);
         await refresh();
         return answer;
       } catch (error) {
@@ -419,7 +472,7 @@ function useActions(sessionId, refresh) {
         setBusy(false);
       }
     },
-    [sessionId, refresh]
+    [sessionId, refresh, repo]
   );
   const confirm = (0, import_react.useCallback)((title, description, body) => setGate({ title, description, body }), []);
   const generateMessage = (0, import_react.useCallback)(async () => {
@@ -429,6 +482,7 @@ function useActions(sessionId, refresh) {
       const answer = await postAction(
         sessionId,
         { action: "generateMessage" },
+        repo,
         AbortSignal.timeout(GENERATE_TIMEOUT_MS)
       );
       if (answer?.truncated === true) setProblem(t("commit.truncatedModel"));
@@ -457,7 +511,7 @@ function useActions(sessionId, refresh) {
 function RiskGate({ gate, onDismiss, run }) {
   const [acknowledged, setAcknowledged] = (0, import_react.useState)(false);
   if (gate === void 0) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
     import_dsh_client_ui_primitives.RiskConfirmation,
     {
       open: true,
@@ -482,8 +536,15 @@ function RiskGate({ gate, onDismiss, run }) {
     }
   );
 }
-function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo }) {
-  const [message, setMessage] = (0, import_react.useState)("");
+function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, currentProject, onSelectProject }) {
+  const [drafts, setDrafts] = (0, import_react.useState)(() => /* @__PURE__ */ new Map());
+  const key = currentProject ?? "";
+  const message = drafts.get(key) ?? "";
+  const setMessage = (value) => setDrafts((current) => {
+    const next = new Map(current);
+    next.set(key, value);
+    return next;
+  });
   const [wide, setWide] = (0, import_react.useState)(false);
   const idle = !busy && !generating;
   const committable = idle && staged.length > 0 && message.trim() !== "";
@@ -493,97 +554,100 @@ function CommitBar({ staged, busy, generating, problem, run, generateMessage, co
     setMessage("");
     run({ action: "commit", message: message.trim() });
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: `gv-commit${wide ? " is-open" : ""}`, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "gv-commit-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        "textarea",
-        {
-          id: "gv-commit-message",
-          className: "gv-input gv-textarea",
-          value: message,
-          rows: 2,
-          disabled: !idle,
-          placeholder: t("commit.placeholder"),
-          "aria-label": t("commit.placeholder"),
-          "aria-expanded": wide,
-          onChange: (event) => setMessage(event.target.value),
-          onKeyDown: (event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              submit();
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ProjectLayer, { projects, current: currentProject, onSelect: onSelectProject }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: `gv-commit${wide ? " is-open" : ""}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-commit-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          "textarea",
+          {
+            id: "gv-commit-message",
+            className: "gv-input gv-textarea",
+            value: message,
+            rows: 2,
+            disabled: !idle,
+            placeholder: t("commit.placeholder"),
+            "aria-label": t("commit.placeholder"),
+            "aria-expanded": wide,
+            onChange: (event) => setMessage(event.target.value),
+            onKeyDown: (event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                submit();
+              }
             }
           }
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        "button",
-        {
-          type: "button",
-          className: "gv-btn icon gv-commit-expand",
-          title: wide ? t("commit.collapse") : t("commit.expand"),
-          "aria-label": wide ? t("commit.collapse") : t("commit.expand"),
-          "aria-expanded": wide,
-          "aria-controls": "gv-commit-message",
-          onClick: () => setWide((value) => !value),
-          children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: wide ? "\u2304" : "\u2303" })
-        }
-      )
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "gv-commit-bar", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-        "button",
-        {
-          type: "button",
-          className: "gv-btn",
-          title: staged.length === 0 ? t("commit.nothingStaged") : generating ? t("commit.generating") : t("commit.generate"),
-          "aria-label": t("commit.generate"),
-          "aria-busy": generating,
-          disabled: !idle || staged.length === 0,
-          onClick: async () => {
-            const generated = await (message.trim() === "" ? generateMessage() : confirmGenerate(generateMessage));
-            if (typeof generated === "string") setMessage(generated);
-          },
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: generating ? "\u2026" : "\u2728" }),
-            " ",
-            t("commit.generateShort")
-          ]
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-        "button",
-        {
-          type: "button",
-          className: "gv-btn primary gv-commit-go",
-          title: staged.length === 0 ? t("commit.nothingStaged") : t("commit.submit"),
-          disabled: !committable,
-          onClick: submit,
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: "\u2713" }),
-            " ",
-            t("commit.submit")
-          ]
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-        "button",
-        {
-          type: "button",
-          className: "gv-btn gv-commit-push",
-          title: noRemote ? t("remote.noRemote") : t("repo.push"),
-          "aria-label": t("repo.push"),
-          disabled: busy || noRemote,
-          onClick: () => confirmPush(),
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: "\u2191" }),
-            " ",
-            t("repo.push")
-          ]
-        }
-      )
-    ] }),
-    staged.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-commit-hint", children: t("commit.nothingStagedHint") }) : null,
-    generating ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-commit-note", role: "status", children: t("commit.generating") }) : problem === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-commit-note error", role: "alert", children: problem })
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          "button",
+          {
+            type: "button",
+            className: "gv-btn icon gv-commit-expand",
+            title: wide ? t("commit.collapse") : t("commit.expand"),
+            "aria-label": wide ? t("commit.collapse") : t("commit.expand"),
+            "aria-expanded": wide,
+            "aria-controls": "gv-commit-message",
+            onClick: () => setWide((value) => !value),
+            children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { "aria-hidden": "true", children: wide ? "\u2304" : "\u2303" })
+          }
+        )
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-commit-bar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+          "button",
+          {
+            type: "button",
+            className: "gv-btn",
+            title: staged.length === 0 ? t("commit.nothingStaged") : generating ? t("commit.generating") : t("commit.generate"),
+            "aria-label": t("commit.generate"),
+            "aria-busy": generating,
+            disabled: !idle || staged.length === 0,
+            onClick: async () => {
+              const generated = await (message.trim() === "" ? generateMessage() : confirmGenerate(generateMessage));
+              if (typeof generated === "string") setMessage(generated);
+            },
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { "aria-hidden": "true", children: generating ? "\u2026" : "\u2728" }),
+              " ",
+              t("commit.generateShort")
+            ]
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+          "button",
+          {
+            type: "button",
+            className: "gv-btn primary gv-commit-go",
+            title: staged.length === 0 ? t("commit.nothingStaged") : t("commit.submit"),
+            disabled: !committable,
+            onClick: submit,
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { "aria-hidden": "true", children: "\u2713" }),
+              " ",
+              projectName === void 0 ? t("commit.submit") : `${t("commit.submit")} \xB7 ${projectName}`
+            ]
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+          "button",
+          {
+            type: "button",
+            className: "gv-btn gv-commit-push",
+            title: noRemote ? t("remote.noRemote") : t("repo.push"),
+            "aria-label": t("repo.push"),
+            disabled: busy || noRemote,
+            onClick: () => confirmPush(),
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { "aria-hidden": "true", children: "\u2191" }),
+              " ",
+              t("repo.push")
+            ]
+          }
+        )
+      ] }),
+      staged.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-hint", children: t("commit.nothingStagedHint") }) : null,
+      generating ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-note", role: "status", children: t("commit.generating") }) : problem === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-note error", role: "alert", children: problem })
+    ] })
   ] });
 }
 function PushGate({ gate, onClose, onConfirm }) {
@@ -592,7 +656,7 @@ function PushGate({ gate, onClose, onConfirm }) {
   const target = repo?.upstream ?? t("repo.push");
   const measured = Array.isArray(repo?.outgoing);
   const outgoing = measured ? repo.outgoing : [];
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
     import_dsh_client_ui_primitives.Modal,
     {
       open: true,
@@ -602,17 +666,17 @@ function PushGate({ gate, onClose, onConfirm }) {
       description: measured ? t("push.summary", { n: outgoing.length, target }) : t("push.unknown", { target }),
       className: "gv-push-modal",
       contentClassName: "gv-push-list",
-      footer: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "gv-btn", onClick: onClose, children: t("action.cancel") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "gv-btn primary", "data-modal-autofocus": true, onClick: onConfirm, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: "\u2191" }),
+      footer: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "gv-btn", onClick: onClose, children: t("action.cancel") }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", className: "gv-btn primary", "data-modal-autofocus": true, onClick: onConfirm, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { "aria-hidden": "true", children: "\u2191" }),
           " ",
           t("repo.push")
         ] })
       ] }),
-      children: !measured ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "gv-push-empty", children: t("push.unknownBody") }) : outgoing.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "gv-push-empty", children: t("push.nothingAhead", { target }) }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", { className: "gv-push-commits", "aria-label": t("push.list"), children: outgoing.map((commit) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { className: "gv-push-commit", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-push-sha", children: commit.sha }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-push-subject", children: commit.subject })
+      children: !measured ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "gv-push-empty", children: t("push.unknownBody") }) : outgoing.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "gv-push-empty", children: t("push.nothingAhead", { target }) }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("ul", { className: "gv-push-commits", "aria-label": t("push.list"), children: outgoing.map((commit) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("li", { className: "gv-push-commit", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-push-sha", children: commit.sha }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-push-subject", children: commit.subject })
       ] }, commit.sha)) })
     }
   );
@@ -633,8 +697,8 @@ function RowActions({ file, side, run, confirm }) {
     }
   ];
   const toggle = staged ? { action: "unstage", paths: [file.path] } : { action: "stage", paths: [file.path] };
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "gv-row-actions", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: "gv-row-actions", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "button",
       {
         type: "button",
@@ -648,14 +712,14 @@ function RowActions({ file, side, run, confirm }) {
         children: staged ? "\u2212" : "+"
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       import_dsh_client_ui_primitives.Menu,
       {
         open,
         align: "end",
         dense: true,
         portal: true,
-        anchor: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        anchor: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "button",
           {
             type: "button",
@@ -701,9 +765,9 @@ function SelectionBar({ files, run, confirm }) {
   const unstaged = bySide("unstaged");
   const untracked = bySide("untracked");
   const discardable = unstaged.length + untracked.length;
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "gv-selection", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "gv-selection-count", children: t("selection.count", { n: files.length }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-selection", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-selection-count", children: t("selection.count", { n: files.length }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "button",
       {
         type: "button",
@@ -712,8 +776,8 @@ function SelectionBar({ files, run, confirm }) {
         children: t("selection.stage")
       }
     ),
-    staged.length === 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "gv-btn", onClick: () => run({ action: "unstage", paths: staged }), children: t("selection.unstage") }),
-    discardable === 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    staged.length === 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "gv-btn", onClick: () => run({ action: "unstage", paths: staged }), children: t("selection.unstage") }),
+    discardable === 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "button",
       {
         type: "button",
@@ -736,8 +800,8 @@ function DirActions({ side, paths, run, confirm }) {
   const staged = side === "staged";
   const untracked = side === "untracked";
   const discardSide = untracked ? "untracked" : "unstaged";
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "gv-row-actions", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: "gv-row-actions", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "button",
       {
         type: "button",
@@ -751,7 +815,7 @@ function DirActions({ side, paths, run, confirm }) {
         children: staged ? "\u2212" : "+"
       }
     ),
-    staged ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    staged ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "button",
       {
         type: "button",
@@ -772,13 +836,13 @@ function DirActions({ side, paths, run, confirm }) {
   ] });
 }
 function GroupActions({ side, paths, run, confirm }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(DirActions, { side, paths, run, confirm });
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(DirActions, { side, paths, run, confirm });
 }
 
 // src/skeleton.jsx
-var import_jsx_runtime2 = require("react/jsx-runtime");
+var import_jsx_runtime3 = require("react/jsx-runtime");
 function Bar({ width, className = "" }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `gv-sk-bar ${className}`, style: { width } });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: `gv-sk-bar ${className}`, style: { width } });
 }
 function TreeSkeleton() {
   const rows = [
@@ -789,49 +853,49 @@ function TreeSkeleton() {
     { indent: 0, name: 28 },
     { indent: 12, name: 70, counts: true }
   ];
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gv-sk", "aria-hidden": "true", children: [0, 1].map((group) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-sk-group", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-sk-head", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "58px" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "14px" })
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-sk", "aria-hidden": "true", children: [0, 1].map((group) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-sk-group", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-sk-head", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "58px" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "14px" })
     ] }),
-    rows.slice(group * 3, group * 3 + 3).map((row, index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-sk-row", style: { paddingLeft: 8 + row.indent }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "10px", className: "gv-sk-mono" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: `${row.name}px` }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-sk-spacer" }),
-      row.counts ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "18px", className: "gv-sk-mono" }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "18px", className: "gv-sk-mono" })
+    rows.slice(group * 3, group * 3 + 3).map((row, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-sk-row", style: { paddingLeft: 8 + row.indent }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "10px", className: "gv-sk-mono" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: `${row.name}px` }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-sk-spacer" }),
+      row.counts ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "18px", className: "gv-sk-mono" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "18px", className: "gv-sk-mono" })
       ] }) : null
     ] }, index))
   ] }, group)) });
 }
 function DiffSkeleton() {
   const widths = ["62%", "38%", "74%", "55%", "44%", "68%", "31%", "57%"];
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-sk", "aria-hidden": "true", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gv-sk-hunk", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "150px", className: "gv-sk-mono" }) }),
-    widths.map((width, index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: `gv-sk-line${index < 3 ? "" : index < 5 ? " add" : " del"}`, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "22px", className: "gv-sk-mono" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "22px", className: "gv-sk-mono" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width })
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-sk", "aria-hidden": "true", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-sk-hunk", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "150px", className: "gv-sk-mono" }) }),
+    widths.map((width, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: `gv-sk-line${index < 3 ? "" : index < 5 ? " add" : " del"}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "22px", className: "gv-sk-mono" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "22px", className: "gv-sk-mono" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width })
     ] }, index))
   ] });
 }
 function FileSkeleton() {
   const widths = ["48%", "66%", "39%", "71%", "52%", "60%", "35%", "58%", "45%"];
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "gv-sk gv-sk-file", "aria-hidden": "true", children: widths.map((width, index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "gv-sk-line", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width: "22px", className: "gv-sk-mono" }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Bar, { width })
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-sk gv-sk-file", "aria-hidden": "true", children: widths.map((width, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-sk-line", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width: "22px", className: "gv-sk-mono" }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Bar, { width })
   ] }, index)) });
 }
 function LoadingAnnounce({ label }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-sk-announce", role: "status", "aria-live": "polite", children: label });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-sk-announce", role: "status", "aria-live": "polite", children: label });
 }
 var treeLoading = () => t("loading.status");
 var diffLoading = () => t("loading.diff");
 var fileLoading = () => t("loading.file");
 
 // src/diff.jsx
-var import_jsx_runtime3 = require("react/jsx-runtime");
+var import_jsx_runtime4 = require("react/jsx-runtime");
 var MAX_LINES = 5e3;
 function unifiedRows(hunk) {
   const rows = [];
@@ -894,72 +958,72 @@ function capHunks(hunks) {
   return { hunks: kept, truncated };
 }
 function UnifiedLine({ row, wrap }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: `gv-line ${row.kind}${wrap ? " wrap" : ""}`, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-no", children: row.old ?? "" }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-no", children: row.new ?? "" }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-text", children: row.text || " " })
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: `gv-line ${row.kind}${wrap ? " wrap" : ""}`, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-no", children: row.old ?? "" }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-no", children: row.new ?? "" }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-text", children: row.text || " " })
   ] });
 }
 function SideLine({ line, wrap }) {
-  if (line === void 0) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-line" });
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: `gv-line ${line.kind}${wrap ? " wrap" : ""}`, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-no", children: line.no }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-text", children: line.text || " " })
+  if (line === void 0) return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-line" });
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: `gv-line ${line.kind}${wrap ? " wrap" : ""}`, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-no", children: line.no }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-text", children: line.text || " " })
   ] });
 }
 function WholeFileView({ data, marks, wrap }) {
   if (data === void 0) {
-    return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(LoadingAnnounce, { label: fileLoading() }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(FileSkeleton, {})
+    return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(LoadingAnnounce, { label: fileLoading() }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(FileSkeleton, {})
     ] });
   }
-  if (data.kind === "error") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note error", children: data.message });
-  if (data.kind === "binary") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note", children: t("status.binary") });
-  if (data.kind === "oversized") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note", children: t("status.oversized") });
+  if (data.kind === "error") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note error", children: data.message });
+  if (data.kind === "binary") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("status.binary") });
+  if (data.kind === "oversized") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("status.oversized") });
   const lines = String(data.text ?? "").split("\n");
   if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   const isAdded = new Set(marks?.added ?? []);
   const dropped = new Map((marks?.removed ?? []).map((block) => [block.at, block.count]));
   const capped = lines.slice(0, MAX_LINES);
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
     capped.map((text, index) => {
       const no = index + 1;
       const marker = dropped.get(no - 1);
-      return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
-        marker === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-dropped", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-no", children: no - 1 }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-dropped-note", children: t("diff.removed", { n: marker }) })
+      return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
+        marker === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "gv-dropped", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-no", children: no - 1 }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-dropped-note", children: t("diff.removed", { n: marker }) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: `gv-line${isAdded.has(no) ? " add" : " ctx"}${wrap ? " wrap" : ""}`, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-no", children: "" }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-no", children: no }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-text", children: text || " " })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: `gv-line${isAdded.has(no) ? " add" : " ctx"}${wrap ? " wrap" : ""}`, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-no", children: "" }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-no", children: no }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-text", children: text || " " })
         ] })
       ] }, no);
     }),
-    dropped.has(capped.length) ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-dropped", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-no", children: capped.length }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "gv-dropped-note", children: t("diff.removed", { n: dropped.get(capped.length) }) })
+    dropped.has(capped.length) ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "gv-dropped", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-no", children: capped.length }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-dropped-note", children: t("diff.removed", { n: dropped.get(capped.length) }) })
     ] }) : null,
-    lines.length > MAX_LINES ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note", children: t("status.oversized") }) : null
+    lines.length > MAX_LINES ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("status.oversized") }) : null
   ] });
 }
 function DiffView({ data, split, wrap, whole, added, removed }) {
   if (data === void 0) {
-    return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(LoadingAnnounce, { label: diffLoading() }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(DiffSkeleton, {})
+    return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(LoadingAnnounce, { label: diffLoading() }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DiffSkeleton, {})
     ] });
   }
-  if (data.kind === "error") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note error", children: data.message });
-  if (data.kind === "binary") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note", children: t("status.binary") });
-  if (data.kind === "oversized") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note", children: t("status.oversized") });
-  if (data.hunks.length === 0) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note", children: t("empty.clean") });
+  if (data.kind === "error") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note error", children: data.message });
+  if (data.kind === "binary") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("status.binary") });
+  if (data.kind === "oversized") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("status.oversized") });
+  if (data.hunks.length === 0) return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("empty.clean") });
   const { hunks, truncated } = capHunks(data.hunks);
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
-    hunks.map((hunk, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-hunk", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
+    hunks.map((hunk, index) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "gv-hunk", children: [
         "@@ -",
         hunk.oldStart,
         ",",
@@ -970,19 +1034,19 @@ function DiffView({ data, split, wrap, whole, added, removed }) {
         hunk.newLines,
         " @@"
       ] }),
-      split ? splitRows(hunk).map((row, line) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "gv-split", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-side", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SideLine, { line: row.left, wrap }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-side", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SideLine, { line: row.right, wrap }) })
-      ] }, line)) : unifiedRows(hunk).map((row, line) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(UnifiedLine, { row, wrap }, line))
+      split ? splitRows(hunk).map((row, line) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "gv-split", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-side", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(SideLine, { line: row.left, wrap }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-side", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(SideLine, { line: row.right, wrap }) })
+      ] }, line)) : unifiedRows(hunk).map((row, line) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(UnifiedLine, { row, wrap }, line))
     ] }, index)),
-    truncated ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "gv-note", children: t("status.oversized") }) : null
+    truncated ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("status.oversized") }) : null
   ] });
 }
 
 // src/file.jsx
 var import_dsh_client_ui_primitives2 = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_react2 = require("react");
-var import_jsx_runtime4 = require("react/jsx-runtime");
+var import_jsx_runtime5 = require("react/jsx-runtime");
 var MARKDOWN = /* @__PURE__ */ new Set(["md", "markdown", "mdx"]);
 var IMAGE = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"]);
 var DOCUMENT = /* @__PURE__ */ new Set(["pdf"]);
@@ -1003,28 +1067,28 @@ function labels() {
 }
 function FileView({ data, wrap, path }) {
   if (data === void 0) {
-    return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(LoadingAnnounce, { label: fileLoading() }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(FileSkeleton, {})
+    return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_jsx_runtime5.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(LoadingAnnounce, { label: fileLoading() }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(FileSkeleton, {})
     ] });
   }
-  if (data.kind === "error") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note error", children: data.message });
-  if (data.kind === "binary") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("status.binary") });
-  if (data.kind === "oversized") return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-note", children: t("status.oversized") });
+  if (data.kind === "error") return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "gv-note error", children: data.message });
+  if (data.kind === "binary") return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "gv-note", children: t("status.binary") });
+  if (data.kind === "oversized") return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "gv-note", children: t("status.oversized") });
   if (previewKind(path) === "image") {
-    return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-file gv-image", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("img", { src: data.dataUrl, alt: path }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "gv-file gv-image", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("img", { src: data.dataUrl, alt: path }) });
   }
   if (previewKind(path) === "document") {
-    return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-file gv-image", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("object", { data: data.dataUrl, type: "application/pdf", "aria-label": path, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "gv-note", children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "gv-file gv-image", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("object", { data: data.dataUrl, type: "application/pdf", "aria-label": path, children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "gv-note", children: [
       t("preview.noDocument"),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("br", {}),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("a", { href: data.dataUrl, download: path.split("/").pop(), children: t("preview.download") })
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("br", {}),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("a", { href: data.dataUrl, download: path.split("/").pop(), children: t("preview.download") })
     ] }) }) });
   }
   if (previewKind(path) === "markdown") {
-    return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-file", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.MarkdownText, { text: data.text, labels: labels() }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "gv-file", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives2.MarkdownText, { text: data.text, labels: labels() }) });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "gv-file", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "gv-file", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
     import_dsh_client_ui_primitives2.CodeBlock,
     {
       code: data.text,
@@ -1037,7 +1101,7 @@ function FileView({ data, wrap, path }) {
     }
   ) });
 }
-function FileEditor({ data, path, sessionId, onSaved }) {
+function FileEditor({ data, path, sessionId, onSaved, repoPath }) {
   const [buffer, setBuffer] = (0, import_react2.useState)(data?.text ?? "");
   const [state, setState] = (0, import_react2.useState)("idle");
   const [problem, setProblem] = (0, import_react2.useState)(void 0);
@@ -1052,17 +1116,17 @@ function FileEditor({ data, path, sessionId, onSaved }) {
     setState("saving");
     setProblem(void 0);
     try {
-      const answer = await writeFile(sessionId, path, buffer, data?.version);
+      const answer = await writeFile(sessionId, path, buffer, data?.version, repoPath);
       setState("saved");
       onSaved?.(answer);
     } catch (error) {
       setProblem(error.message);
       setState("idle");
     }
-  }, [state, sessionId, path, buffer, data?.version, onSaved]);
+  }, [state, sessionId, path, buffer, data?.version, onSaved, repoPath]);
   const dirty = data !== void 0 && buffer !== data.text;
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "gv-editor", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "gv-editor", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
       "textarea",
       {
         ref: area,
@@ -1082,12 +1146,12 @@ function FileEditor({ data, path, sessionId, onSaved }) {
         }
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "gv-editor-bar", children: [
-      dirty ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-dirty", children: t("edit.dirty") }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-note-inline", children: t("edit.clean") }),
-      problem === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-editor-problem", children: problem }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-spacer" }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "gv-editor-hint", children: t("edit.hint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "gv-editor-bar", children: [
+      dirty ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-dirty", children: t("edit.dirty") }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-note-inline", children: t("edit.clean") }),
+      problem === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-editor-problem", children: problem }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-spacer" }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-editor-hint", children: t("edit.hint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
         "button",
         {
           type: "button",
@@ -1103,7 +1167,7 @@ function FileEditor({ data, path, sessionId, onSaved }) {
 
 // src/hover.jsx
 var import_react3 = require("react");
-var import_jsx_runtime5 = require("react/jsx-runtime");
+var import_jsx_runtime6 = require("react/jsx-runtime");
 var HOVER_DELAY_MS = 450;
 var MAX_LINES2 = 60;
 function HoverCard({ hover, sessionId, onDismiss }) {
@@ -1153,7 +1217,7 @@ function HoverCard({ hover, sessionId, onDismiss }) {
   const flipY = hover.y + 320 > globalThis.innerHeight;
   const left = flipX ? Math.max(margin, hover.x - width - margin) : hover.x + margin;
   const top = flipY ? Math.max(margin, hover.y - 280) : hover.y + margin;
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
     "div",
     {
       ref: cardRef,
@@ -1161,18 +1225,18 @@ function HoverCard({ hover, sessionId, onDismiss }) {
       style: { left: `${left}px`, top: `${top}px`, width: `${width}px` },
       role: "tooltip",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "gv-hover-head", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: `gv-letter ${hover.letter}`, "aria-hidden": "true", children: hover.file.status }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-hover-path", title: hover.file.path, children: hover.file.name }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-hover-count", children: diff === void 0 || rows.length === 0 ? "" : `+${added} \u2212${removed}` })
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "gv-hover-head", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: `gv-letter ${hover.letter}`, "aria-hidden": "true", children: hover.file.status }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "gv-hover-path", title: hover.file.path, children: hover.file.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "gv-hover-count", children: diff === void 0 || rows.length === 0 ? "" : `+${added} \u2212${removed}` })
         ] }),
-        failed ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "gv-hover-note", children: t("preview.hoverFailed") }) : diff === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "gv-hover-note", children: t("preview.hoverLoading") }) : rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "gv-hover-note", children: t("preview.hoverEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_jsx_runtime5.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "gv-hover-body", children: shown.map((row, index) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: `gv-hover-line ${row.kind}`, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-hover-no", children: row.kind === "add" ? row.new : row.old }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-hover-sign", "aria-hidden": "true", children: row.kind === "add" ? "+" : row.kind === "del" ? "-" : " " }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "gv-hover-text", children: row.text })
+        failed ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "gv-hover-note", children: t("preview.hoverFailed") }) : diff === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "gv-hover-note", children: t("preview.hoverLoading") }) : rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "gv-hover-note", children: t("preview.hoverEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "gv-hover-body", children: shown.map((row, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: `gv-hover-line ${row.kind}`, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "gv-hover-no", children: row.kind === "add" ? row.new : row.old }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "gv-hover-sign", "aria-hidden": "true", children: row.kind === "add" ? "+" : row.kind === "del" ? "-" : " " }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "gv-hover-text", children: row.text })
           ] }, `${row.old}:${row.new}:${index}`)) }),
-          rest > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "gv-hover-note", children: t("preview.hoverMore", { n: rest }) }) : null
+          rest > 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "gv-hover-note", children: t("preview.hoverMore", { n: rest }) }) : null
         ] })
       ]
     }
@@ -1200,14 +1264,14 @@ function useFileHover(sessionId) {
     hover,
     bind,
     dismiss,
-    card: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(HoverCard, { hover, sessionId, onDismiss: dismiss })
+    card: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(HoverCard, { hover, sessionId, onDismiss: dismiss })
   };
 }
 
 // src/repo.jsx
 var import_dsh_client_ui_primitives3 = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_react4 = require("react");
-var import_jsx_runtime6 = require("react/jsx-runtime");
+var import_jsx_runtime7 = require("react/jsx-runtime");
 function RepoBulkMenu({ status, run, confirm, busy }) {
   const [open, setOpen] = (0, import_react4.useState)(false);
   const close = () => setOpen(false);
@@ -1227,14 +1291,14 @@ function RepoBulkMenu({ status, run, confirm, busy }) {
   if (untracked.length > 0) {
     items.push({ id: "discardUntracked", label: count(untracked, "repo.discardUntracked"), danger: true });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
     import_dsh_client_ui_primitives3.Menu,
     {
       open,
       align: "end",
       dense: true,
       portal: true,
-      anchor: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+      anchor: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
         "button",
         {
           type: "button",
@@ -1274,8 +1338,8 @@ function RepoBulkMenu({ status, run, confirm, busy }) {
 function RemoteActions({ repo, run, busy }) {
   const noRemote = repo.hasRemote === false;
   const noUpstream = !repo.upstream;
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "gv-remote", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "gv-remote", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
       "button",
       {
         type: "button",
@@ -1285,13 +1349,13 @@ function RemoteActions({ repo, run, busy }) {
         "aria-label": t("repo.pull"),
         onClick: () => run({ action: "pull" }),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { "aria-hidden": "true", children: "\u2193" }),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: "\u2193" }),
           " ",
           t("repo.pull")
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
       "button",
       {
         type: "button",
@@ -1301,7 +1365,7 @@ function RemoteActions({ repo, run, busy }) {
         "aria-label": t("repo.sync"),
         onClick: () => run({ action: "sync" }),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { "aria-hidden": "true", children: "\u21C5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: "\u21C5" }),
           " ",
           t("repo.sync")
         ]
@@ -1309,7 +1373,7 @@ function RemoteActions({ repo, run, busy }) {
     )
   ] });
 }
-function BranchMenu({ sessionId, repo, run }) {
+function BranchMenu({ sessionId, repo, run, repoPath }) {
   const [open, setOpen] = (0, import_react4.useState)(false);
   const [roster, setRoster] = (0, import_react4.useState)(void 0);
   const [creating, setCreating] = (0, import_react4.useState)(false);
@@ -1320,19 +1384,19 @@ function BranchMenu({ sessionId, repo, run }) {
     const controller = new AbortController();
     setRoster(void 0);
     setCreating(false);
-    readBranches(sessionId, controller.signal).then(setRoster).catch((error) => setRoster({ error: error.message }));
+    readBranches(sessionId, repoPath, controller.signal).then(setRoster).catch((error) => setRoster({ error: error.message }));
     return () => controller.abort();
-  }, [sessionId, open]);
+  }, [sessionId, repoPath, open]);
   const locals = roster?.branches?.filter((branch) => !branch.remote) ?? [];
   const remotes = roster?.branches?.filter((branch) => branch.remote) ?? [];
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
     import_dsh_client_ui_primitives3.Menu,
     {
       open,
       align: "start",
       dense: true,
       portal: true,
-      anchor: /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+      anchor: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
         "button",
         {
           type: "button",
@@ -1342,13 +1406,13 @@ function BranchMenu({ sessionId, repo, run }) {
           onClick: () => setOpen((value) => !value),
           children: [
             repo.detached ? `${t("branch.detached")} @ ${(repo.oid ?? "").slice(0, 7)}` : repo.branch,
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { "aria-hidden": "true", children: " \u25BE" })
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: " \u25BE" })
           ]
         }
       ),
       onClose: close,
-      children: creating ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "gv-branch-new", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+      children: creating ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "gv-branch-new", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
           "input",
           {
             className: "gv-input",
@@ -1366,7 +1430,7 @@ function BranchMenu({ sessionId, repo, run }) {
             }
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
           "button",
           {
             type: "button",
@@ -1382,8 +1446,8 @@ function BranchMenu({ sessionId, repo, run }) {
             children: t("branch.create")
           }
         )
-      ] }) : roster?.error !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "gv-menu-note", children: roster.error }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-        locals.map((branch) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+      ] }) : roster?.error !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "gv-menu-note", children: roster.error }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+        locals.map((branch) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
           "button",
           {
             type: "button",
@@ -1394,8 +1458,8 @@ function BranchMenu({ sessionId, repo, run }) {
               run({ action: "checkout", branch: branch.name });
             },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: branch.name }),
-              /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "gv-menu-meta", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: branch.name }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "gv-menu-meta", children: [
                 branch.current ? t("branch.current") : "",
                 branch.ahead > 0 ? ` \u2191${branch.ahead}` : "",
                 branch.behind > 0 ? ` \u2193${branch.behind}` : ""
@@ -1404,8 +1468,8 @@ function BranchMenu({ sessionId, repo, run }) {
           },
           branch.name
         )),
-        remotes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "gv-menu-group", children: t("branch.remote") }) : null,
-        remotes.map((branch) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+        remotes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "gv-menu-group", children: t("branch.remote") }) : null,
+        remotes.map((branch) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
           "button",
           {
             type: "button",
@@ -1415,13 +1479,13 @@ function BranchMenu({ sessionId, repo, run }) {
               run({ action: "checkout", branch: branch.name });
             },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: branch.name }),
-              /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "gv-menu-meta", children: branch.sha })
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: branch.name }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "gv-menu-meta", children: branch.sha })
             ]
           },
           branch.name
         )),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
           "button",
           {
             type: "button",
@@ -1435,7 +1499,7 @@ function BranchMenu({ sessionId, repo, run }) {
     }
   );
 }
-function StashMenu({ sessionId, run, confirm }) {
+function StashMenu({ sessionId, run, confirm, repoPath }) {
   const [open, setOpen] = (0, import_react4.useState)(false);
   const [stashes, setStashes] = (0, import_react4.useState)(void 0);
   const close = () => setOpen(false);
@@ -1443,17 +1507,17 @@ function StashMenu({ sessionId, run, confirm }) {
     if (!open) return void 0;
     const controller = new AbortController();
     setStashes(void 0);
-    readStashes(sessionId, controller.signal).then((answer) => setStashes(answer.stashes)).catch((error) => setStashes({ error: error.message }));
+    readStashes(sessionId, repoPath, controller.signal).then((answer) => setStashes(answer.stashes)).catch((error) => setStashes({ error: error.message }));
     return () => controller.abort();
-  }, [sessionId, open]);
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+  }, [sessionId, repoPath, open]);
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
     import_dsh_client_ui_primitives3.Menu,
     {
       open,
       align: "end",
       dense: true,
       portal: true,
-      anchor: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+      anchor: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
         "button",
         {
           type: "button",
@@ -1465,8 +1529,8 @@ function StashMenu({ sessionId, run, confirm }) {
         }
       ),
       onClose: close,
-      children: stashes === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "gv-menu-note", children: "\u2026" }) : Array.isArray(stashes) === false ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "gv-menu-note", children: stashes.error }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+      children: stashes === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "gv-menu-note", children: "\u2026" }) : Array.isArray(stashes) === false ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "gv-menu-note", children: stashes.error }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
           "button",
           {
             type: "button",
@@ -1478,10 +1542,10 @@ function StashMenu({ sessionId, run, confirm }) {
             children: t("stash.push")
           }
         ),
-        stashes.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "gv-menu-note", children: t("stash.empty") }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "gv-menu-group", children: t("stash.list") }),
-          stashes.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "gv-stash", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+        stashes.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "gv-menu-note", children: t("stash.empty") }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "gv-menu-group", children: t("stash.list") }),
+          stashes.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "gv-stash", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
               "button",
               {
                 type: "button",
@@ -1491,15 +1555,15 @@ function StashMenu({ sessionId, run, confirm }) {
                   run({ action: "stash.apply", ref: entry.ref });
                 },
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: entry.message || entry.ref }),
-                  /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "gv-menu-meta", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: entry.message || entry.ref }),
+                  /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "gv-menu-meta", children: [
                     entry.branch === null ? "" : `${entry.branch} \xB7 `,
                     t("stash.files", { n: entry.files })
                   ] })
                 ]
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
               "button",
               {
                 type: "button",
@@ -1515,7 +1579,7 @@ function StashMenu({ sessionId, run, confirm }) {
               }
             )
           ] }, entry.ref)),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
             "button",
             {
               type: "button",
@@ -1608,7 +1672,7 @@ function buildTree(files) {
 }
 
 // src/tree.jsx
-var import_jsx_runtime7 = require("react/jsx-runtime");
+var import_jsx_runtime8 = require("react/jsx-runtime");
 var LETTERS = {
   M: "gv-letter-M",
   A: "gv-letter-A",
@@ -1632,7 +1696,7 @@ function Counts({ files }) {
   if (added > 0) out.push(`+${added}`);
   if (removed > 0) out.push(`-${removed}`);
   if (binary) out.push(t("status.binary"));
-  return out.map((text) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return out.map((text) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
     "span",
     {
       className: `gv-num ${text.startsWith("+") ? "gv-add" : text.startsWith("-") ? "gv-del" : "gv-flag"}`,
@@ -1672,8 +1736,8 @@ function visibleOrder(status, collapsed) {
 function FileRow({ file, side, depth, selected, onSelect, actions, hover, checked, onCheck }) {
   const letter = LETTERS[file.status] ?? "gv-letter-M";
   const isChecked = checked.has(file.path);
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "gv-row-wrap", children: [
-    onCheck === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { className: "gv-check", title: t("selection.checkTitle"), children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "gv-row-wrap", children: [
+    onCheck === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { className: "gv-check", title: t("selection.checkTitle"), children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       "input",
       {
         type: "checkbox",
@@ -1682,7 +1746,7 @@ function FileRow({ file, side, depth, selected, onSelect, actions, hover, checke
         onChange: () => onCheck(file.path)
       }
     ) }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
       "button",
       {
         type: "button",
@@ -1693,14 +1757,14 @@ function FileRow({ file, side, depth, selected, onSelect, actions, hover, checke
         title: file.path,
         ...hover === void 0 ? {} : hover.bind(file, side, letter),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "gv-chevron", "aria-hidden": "true" }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: `gv-letter ${letter}`, "aria-hidden": "true", children: file.status }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "gv-name", children: file.name }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counts, { files: [file] })
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-chevron", "aria-hidden": "true" }),
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: `gv-letter ${letter}`, "aria-hidden": "true", children: file.status }),
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-name", children: file.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counts, { files: [file] })
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(RowActions, { file, side, run: actions.run, confirm: actions.confirm })
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(RowActions, { file, side, run: actions.run, confirm: actions.confirm })
   ] });
 }
 function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, actions, hover, checked, onCheck, expand }) {
@@ -1713,9 +1777,9 @@ function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, act
   (0, import_react5.useEffect)(() => {
     if (open && wantsContents && info === void 0) expand?.request(dir.path);
   }, [open, wantsContents, info, dir.path, expand]);
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "gv-row-wrap", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "gv-row-wrap", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
         "button",
         {
           type: "button",
@@ -1725,18 +1789,18 @@ function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, act
           onClick: () => onToggle(key),
           title: dir.path,
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "gv-chevron", "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "gv-letter", "aria-hidden": "true" }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "gv-name", children: dir.name }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counts, { files: dir.all }),
-            info?.truncated === true ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "gv-num gv-add", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-chevron", "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-letter", "aria-hidden": "true" }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-name", children: dir.name }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counts, { files: dir.all }),
+            info?.truncated === true ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "gv-num gv-add", children: [
               "+",
               info.total - (info.files?.length ?? 0)
             ] }) : null
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         DirActions,
         {
           side,
@@ -1746,13 +1810,13 @@ function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, act
         }
       )
     ] }),
-    loading ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "gv-row gv-subnote", style: { paddingLeft: 8 + (depth + 1) * INDENT }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: `gv-spin`, "aria-hidden": "true", children: "\u27F3" }),
+    loading ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "gv-row gv-subnote", style: { paddingLeft: 8 + (depth + 1) * INDENT }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: `gv-spin`, "aria-hidden": "true", children: "\u27F3" }),
       " ",
       t("tree.reading")
     ] }) : null,
-    failed ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "gv-row gv-subnote error", style: { paddingLeft: 8 + (depth + 1) * INDENT }, children: info.failure }) : null,
-    open ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    failed ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-row gv-subnote error", style: { paddingLeft: 8 + (depth + 1) * INDENT }, children: info.failure }) : null,
+    open ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       TreeLevel,
       {
         node: dir,
@@ -1764,8 +1828,8 @@ function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, act
   ] });
 }
 function TreeLevel({ node, side, depth, collapsed, onToggle, selected, onSelect, actions, hover, checked, onCheck, expand }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-    node.dirs.map((dir) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+    node.dirs.map((dir) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       DirRow,
       {
         dir,
@@ -1783,7 +1847,7 @@ function TreeLevel({ node, side, depth, collapsed, onToggle, selected, onSelect,
       },
       dir.path
     )),
-    node.files.map((file) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    node.files.map((file) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       FileRow,
       {
         file,
@@ -1805,22 +1869,22 @@ function FileGroup({ title, files, side, selected, onSelect, open, onToggle, col
   const root = buildTree(files);
   sortNode(root);
   const hidden = (total ?? files.length) - files.length;
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "gv-group", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "gv-group-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("button", { type: "button", className: "gv-group-head", onClick: onToggle, "aria-expanded": open, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "gv-chevron", "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("section", { className: "gv-group", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "gv-group-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("button", { type: "button", className: "gv-group-head", onClick: onToggle, "aria-expanded": open, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-chevron", "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { children: [
           title,
           " (",
           total ?? files.length,
           ")"
         ] }),
-        hidden > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "gv-count-hidden", children: [
+        hidden > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "gv-count-hidden", children: [
           "+",
           hidden
         ] }) : null
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         GroupActions,
         {
           side,
@@ -1830,7 +1894,7 @@ function FileGroup({ title, files, side, selected, onSelect, open, onToggle, col
         }
       )
     ] }),
-    open ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    open ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       TreeLevel,
       {
         node: root,
@@ -1856,7 +1920,7 @@ function FileTree({ status, selected, onSelect, collapsed, onToggle, onToggleDir
     { key: "unstaged", side: "unstaged", title: t("group.unstaged"), files: status.unstaged },
     { key: "untracked", side: "untracked", title: t("group.untracked"), files: status.untracked }
   ];
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "gv-tree", role: "tree", children: groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-tree", role: "tree", children: groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
     FileGroup,
     {
       title: group.title,
@@ -2104,10 +2168,29 @@ var CSS = `
 .gv-menu-note{padding:8px 10px;font-size:12px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word;max-width:280px}
 .gv-branch-new{display:flex;gap:6px;padding:6px 10px}
 .gv-stash{border-bottom:1px solid var(--dsw-alias-border-l1)}
+
+/* The project layer sits above the commit bar: a strip of every repository on
+   offer, so which one is current, and which are waiting, is readable without
+   scrolling or clicking. */
+.gv-projects{flex:0 0 auto;max-height:132px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.gv-project{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;border-radius:0;background:none;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;cursor:pointer}
+.gv-project:hover{background:var(--dsw-alias-bg-neutral-hover)}
+.gv-project.current{background:var(--dsw-alias-bg-neutral-active)}
+.gv-project.current .gv-project-name{font-weight:600}
+/* The dot carries the state and the dot alone: four different words beside it
+   would compete with a row that should be readable in one glance. */
+.gv-project-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
+.gv-project-dot.changed{background:var(--dsw-alias-label-secondary)}
+.gv-project-dot.ready{background:var(--dsw-alias-accent-base)}
+.gv-project-dot.conflict{background:var(--dsw-alias-state-error-primary)}
+.gv-project-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gv-project-branch{flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.gv-project-count{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.gv-project:focus-visible{outline:2px solid var(--dsw-alias-accent-base);outline-offset:-2px}
 `;
 
 // src/view.jsx
-var import_jsx_runtime8 = require("react/jsx-runtime");
+var import_jsx_runtime9 = require("react/jsx-runtime");
 var INITIALLY_COLLAPSED = /* @__PURE__ */ new Set(["untracked"]);
 var FILE_SIDE = { staged: "staged", unstaged: "worktree", untracked: "worktree" };
 var GROUPS = ["conflicts", "staged", "unstaged", "untracked"];
@@ -2224,22 +2307,22 @@ function useChoice(key, allowed, fallback) {
   }, [key]);
   return [value, choose];
 }
-function RepoHeader({ status, onRefresh, sessionId, run, confirm, busy, loading }) {
+function RepoHeader({ status, onRefresh, sessionId, run, confirm, busy, loading, repoPath }) {
   const repo = status.repo;
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "gv-head", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-repo", title: repo.root, children: repo.name }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(BranchMenu, { sessionId, repo, run }),
-    repo.ahead > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "gv-count", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "gv-head", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "gv-repo", title: repo.root, children: repo.name }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(BranchMenu, { sessionId, repo, run, repoPath }),
+    repo.ahead > 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "gv-count", children: [
       "\u2191",
       repo.ahead
     ] }) : null,
-    repo.behind > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "gv-count", children: [
+    repo.behind > 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "gv-count", children: [
       "\u2193",
       repo.behind
     ] }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-spacer" }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(StashMenu, { sessionId, run, confirm }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "gv-spacer" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(StashMenu, { sessionId, run, confirm, repoPath }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
       "button",
       {
         type: "button",
@@ -2249,24 +2332,24 @@ function RepoHeader({ status, onRefresh, sessionId, run, confirm, busy, loading 
         "aria-busy": loading,
         title: loading ? t("loading.refreshing") : t("action.refresh"),
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: loading ? "gv-spin" : void 0, "aria-hidden": "true", children: "\u27F3" }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: loading ? "gv-spin" : void 0, "aria-hidden": "true", children: "\u27F3" }),
           " ",
           loading ? t("loading.refreshing") : t("action.refresh")
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(RemoteActions, { repo, run, busy }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(RepoBulkMenu, { status, run, confirm, busy })
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RemoteActions, { repo, run, busy }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RepoBulkMenu, { status, run, confirm, busy })
   ] });
 }
-function DetailHeader({ file, mode, onMode, split, onSplit, wrap, onWrap, scope, onScope }) {
+function DetailHeader({ file, mode, onMode, split, onSplit, wrap, onWrap, scope: scope2, onScope }) {
   const editable = (file.side === "unstaged" || file.side === "untracked") && (previewKind(file.path) === "source" || previewKind(file.path) === "markdown");
   const viewable = previewKind(file.path) !== "document";
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "gv-detail-head", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-path", title: file.path, children: file.path }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-spacer" }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": mode === "diff", onClick: () => onMode("diff"), children: t("mode.diff") }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "gv-detail-head", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "gv-path", title: file.path, children: file.path }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "gv-spacer" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": mode === "diff", onClick: () => onMode("diff"), children: t("mode.diff") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       "button",
       {
         type: "button",
@@ -2278,7 +2361,7 @@ function DetailHeader({ file, mode, onMode, split, onSplit, wrap, onWrap, scope,
         children: t("mode.file")
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       "button",
       {
         type: "button",
@@ -2290,30 +2373,32 @@ function DetailHeader({ file, mode, onMode, split, onSplit, wrap, onWrap, scope,
         children: t("mode.edit")
       }
     ),
-    mode === "diff" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": scope === "whole", onClick: () => onScope("whole"), children: t("diff.whole") }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": scope === "changes", onClick: () => onScope("changes"), children: t("diff.changes") }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": split, onClick: () => onSplit(true), children: t("layout.split") })
+    mode === "diff" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": scope2 === "whole", onClick: () => onScope("whole"), children: t("diff.whole") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": scope2 === "changes", onClick: () => onScope("changes"), children: t("diff.changes") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": split, onClick: () => onSplit(true), children: t("layout.split") })
     ] }) : null,
-    mode === "file" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": wrap, onClick: onWrap, children: t("action.wrap") }) : null
+    mode === "file" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { type: "button", className: "gv-btn", "aria-pressed": wrap, onClick: onWrap, children: t("action.wrap") }) : null
   ] });
 }
 function TreePanel({ status, failure }) {
   if (status === void 0) {
     if (failure !== void 0) return null;
-    return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(LoadingAnnounce, { label: treeLoading() }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(TreeSkeleton, {})
+    return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(LoadingAnnounce, { label: treeLoading() }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(TreeSkeleton, {})
     ] });
   }
-  if (failure !== void 0) return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-note error", children: failure.message });
+  if (failure !== void 0) return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "gv-note error", children: failure.message });
   if (status.available === false) {
-    return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-note", children: status.reason === "git-unavailable" ? t("empty.gitUnavailable") : t("empty.notRepository") });
+    return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "gv-note", children: status.reason === "git-unavailable" ? t("empty.gitUnavailable") : t("empty.notRepository") });
   }
   return null;
 }
 function GitView({ sessionId, useSessionStatus }) {
   const [status, setStatus] = (0, import_react6.useState)(void 0);
+  const [projects, setProjects] = (0, import_react6.useState)(void 0);
+  const [projectPath, setProjectPath] = (0, import_react6.useState)(void 0);
   const [failure, setFailure] = (0, import_react6.useState)(void 0);
   const [loading, setLoading] = (0, import_react6.useState)(true);
   const [reload, setReload] = (0, import_react6.useState)(0);
@@ -2321,8 +2406,8 @@ function GitView({ sessionId, useSessionStatus }) {
   const [diff, setDiff] = (0, import_react6.useState)(void 0);
   const [file, setFile] = (0, import_react6.useState)(void 0);
   const [mode, setMode] = (0, import_react6.useState)("diff");
-  const [scope, setScope] = useChoice(SCOPE_KEY, SCOPES, SCOPE_DEFAULT);
-  const split = scope === "split";
+  const [scope2, setScope] = useChoice(SCOPE_KEY, SCOPES, SCOPE_DEFAULT);
+  const split = scope2 === "split";
   const [wrap, setWrap] = (0, import_react6.useState)(false);
   const columns = useSplit();
   const room = useAvailableHeight();
@@ -2341,7 +2426,7 @@ function GitView({ sessionId, useSessionStatus }) {
       });
       const controller = new AbortController();
       pending.current.push(controller);
-      readUntracked(sessionId, `${dir}/`, controller.signal).then(
+      readUntracked(sessionId, `${dir}/`, projectPath, controller.signal).then(
         (answer) => setOpened((current) => {
           const next = new Map(current);
           next.set(dir, { files: answer.files, total: answer.total, truncated: answer.truncated });
@@ -2358,7 +2443,7 @@ function GitView({ sessionId, useSessionStatus }) {
         pending.current = pending.current.filter((one) => one !== controller);
       });
     },
-    [sessionId]
+    [sessionId, projectPath]
   );
   const expand = (0, import_react6.useMemo)(() => ({ state: opened, request: requestOpen }), [opened, requestOpen]);
   const shown = (0, import_react6.useMemo)(() => {
@@ -2422,9 +2507,24 @@ function GitView({ sessionId, useSessionStatus }) {
   }, [running]);
   (0, import_react6.useEffect)(() => {
     const controller = new AbortController();
+    readRepositories(sessionId, controller.signal).then((answer) => {
+      setProjects(answer.repos);
+      setFailure(void 0);
+      setProjectPath(
+        (current) => current !== void 0 && answer.repos.some((entry) => entry.path === current) ? current : answer.repos[0]?.path ?? void 0
+      );
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      setProjects([]);
+      setFailure(error);
+    });
+    return () => controller.abort();
+  }, [sessionId, reload]);
+  (0, import_react6.useEffect)(() => {
+    const controller = new AbortController();
     setFailure(void 0);
     setLoading(true);
-    readStatus(sessionId, controller.signal).then((answer) => setStatus(answer)).catch((error) => {
+    readStatus(sessionId, projectPath, controller.signal).then((answer) => setStatus(answer)).catch((error) => {
       if (controller.signal.aborted) return;
       setStatus(void 0);
       setFailure(error);
@@ -2432,7 +2532,7 @@ function GitView({ sessionId, useSessionStatus }) {
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [sessionId, reload]);
+  }, [sessionId, projectPath, reload]);
   (0, import_react6.useEffect)(() => {
     if (selected === void 0 || status === void 0 || status.available === false) return;
     const stillThere = (status[selected.side] ?? []).some((file2) => file2.path === selected.path);
@@ -2448,14 +2548,14 @@ function GitView({ sessionId, useSessionStatus }) {
     }
     const controller = new AbortController();
     setDiff(void 0);
-    readDiff(sessionId, selected.path, selected.side, controller.signal).then((answer) => setDiff(answer)).catch((error) => {
+    readDiff(sessionId, selected.path, selected.side, projectPath, controller.signal).then((answer) => setDiff(answer)).catch((error) => {
       if (controller.signal.aborted) return;
       setDiff({ kind: "error", message: error.message });
     });
     return () => controller.abort();
-  }, [sessionId, selected]);
+  }, [sessionId, selected, projectPath]);
   const fileKey = (0, import_react6.useRef)(void 0);
-  const needsText = selected !== void 0 && (mode === "file" || mode === "edit" || mode === "diff" && scope === "whole");
+  const needsText = selected !== void 0 && (mode === "file" || mode === "edit" || mode === "diff" && scope2 === "whole");
   (0, import_react6.useEffect)(() => {
     if (selected === void 0) {
       fileKey.current = void 0;
@@ -2463,17 +2563,17 @@ function GitView({ sessionId, useSessionStatus }) {
       return void 0;
     }
     if (!needsText) return void 0;
-    const key = `${selected.side}:${selected.path}#${reload}`;
+    const key = `${projectPath ?? ""}:${selected.side}:${selected.path}#${reload}`;
     if (fileKey.current === key) return void 0;
     const controller = new AbortController();
     fileKey.current = key;
     setFile(void 0);
-    readFile(sessionId, selected.path, FILE_SIDE[selected.side] ?? "worktree", controller.signal).then((answer) => setFile(answer)).catch((error) => {
+    readFile(sessionId, selected.path, FILE_SIDE[selected.side] ?? "worktree", projectPath, controller.signal).then((answer) => setFile(answer)).catch((error) => {
       if (controller.signal.aborted) return;
       setFile({ kind: "error", message: error.message });
     });
     return () => controller.abort();
-  }, [sessionId, selected, needsText, reload]);
+  }, [sessionId, selected, needsText, reload, projectPath]);
   const [generateGate, setGenerateGate] = (0, import_react6.useState)(void 0);
   const confirmGenerate = (0, import_react6.useCallback)(async (make) => {
     setGenerateGate({
@@ -2501,13 +2601,16 @@ function GitView({ sessionId, useSessionStatus }) {
     });
   }, []);
   const reloadStatus = (0, import_react6.useCallback)(
-    () => readStatus(sessionId).then((answer) => {
+    () => readStatus(sessionId, projectPath).then((answer) => {
       setStatus(answer);
       setFailure(void 0);
     }).catch((error) => setFailure(error)),
-    [sessionId]
+    [sessionId, projectPath]
   );
-  const actions = useActions(sessionId, reloadStatus);
+  const refreshAll = (0, import_react6.useCallback)(() => {
+    setReload((value) => value + 1);
+  }, []);
+  const actions = useActions(sessionId, reloadStatus, projectPath);
   const { run, confirm, gate, dismiss, busy, generating, generateMessage, problem } = actions;
   const move = (0, import_react6.useCallback)(
     (step) => {
@@ -2524,24 +2627,25 @@ function GitView({ sessionId, useSessionStatus }) {
     },
     [status, collapsed, selected]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "gv", ref: room.self, style: { "--gv-room": `${room.room}px` }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("style", { children: CSS }),
-    status?.available === true && failure === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "gv", ref: room.self, style: { "--gv-room": `${room.room}px` }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("style", { children: CSS }),
+    status?.available === true && failure === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       RepoHeader,
       {
         status,
-        onRefresh: () => setReload((value) => value + 1),
+        onRefresh: refreshAll,
         sessionId,
         run,
         confirm,
         busy,
-        loading
+        loading,
+        repoPath: projectPath
       }
-    ) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-head", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "gv-spacer" }) }),
-    problem === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-banner error", children: problem }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "gv-body", ref: columns.body, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-list", style: columns.style, children: status === void 0 || status.available === false ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(TreePanel, { status, failure }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+    ) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "gv-head", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "gv-spacer" }) }),
+    problem === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "gv-banner error", children: problem }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "gv-body", ref: columns.body, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "gv-list", style: columns.style, children: status === void 0 || status.available === false ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(TreePanel, { status, failure }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
           CommitBar,
           {
             staged: status.staged,
@@ -2552,10 +2656,14 @@ function GitView({ sessionId, useSessionStatus }) {
             generateMessage,
             confirmGenerate,
             confirmPush: () => setPushGate({ repo: status.repo }),
-            repo: status.repo
+            repo: status.repo,
+            projectName: status.repo?.name,
+            projects,
+            currentProject: projectPath,
+            onSelectProject: setProjectPath
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
           "div",
           {
             className: "gv-tree-scroll",
@@ -2571,7 +2679,7 @@ function GitView({ sessionId, useSessionStatus }) {
                 move(-1);
               }
             },
-            children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+            children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
               FileTree,
               {
                 status: shown,
@@ -2589,9 +2697,9 @@ function GitView({ sessionId, useSessionStatus }) {
             )
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(SelectionBar, { files: checkedFiles, run, confirm })
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(SelectionBar, { files: checkedFiles, run, confirm })
       ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "div",
         {
           className: "gv-sizer",
@@ -2601,8 +2709,8 @@ function GitView({ sessionId, useSessionStatus }) {
           onPointerDown: columns.onPointerDown
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-detail", children: selected === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-note", children: t("empty.select") }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "gv-detail", children: selected === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "gv-note", children: t("empty.select") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
           DetailHeader,
           {
             file: selected,
@@ -2612,14 +2720,14 @@ function GitView({ sessionId, useSessionStatus }) {
             onSplit: () => setScope("split"),
             wrap,
             onWrap: () => setWrap((value) => !value),
-            scope,
+            scope: scope2,
             onScope: setScope
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-scroll", children: mode === "diff" ? scope === "whole" ? (
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "gv-scroll", children: mode === "diff" ? scope2 === "whole" ? (
           // The whole file is shown from the same text the editor edits, and the
           // change is marked from the diff's own line numbers.
-          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
             WholeFileView,
             {
               data: file,
@@ -2627,19 +2735,20 @@ function GitView({ sessionId, useSessionStatus }) {
               wrap
             }
           )
-        ) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DiffView, { data: diff, split, wrap }) : mode === "edit" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        ) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(DiffView, { data: diff, split, wrap }) : mode === "edit" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
           FileEditor,
           {
             data: file,
             path: selected.path,
             sessionId,
+            repoPath: projectPath,
             onSaved: () => setReload((value) => value + 1)
           }
-        ) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(FileView, { data: file, wrap, path: selected.path }) })
+        ) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(FileView, { data: file, wrap, path: selected.path }) })
       ] }) })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(RiskGate, { gate, onDismiss: dismiss, run }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RiskGate, { gate, onDismiss: dismiss, run }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       PushGate,
       {
         gate: pushGate,
@@ -2650,7 +2759,7 @@ function GitView({ sessionId, useSessionStatus }) {
         }
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       import_dsh_client_ui_primitives4.RiskConfirmation,
       {
         open: generateGate !== void 0,

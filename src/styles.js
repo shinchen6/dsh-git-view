@@ -227,4 +227,23 @@ export const CSS = `
 .gv-menu-note{padding:8px 10px;font-size:12px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word;max-width:280px}
 .gv-branch-new{display:flex;gap:6px;padding:6px 10px}
 .gv-stash{border-bottom:1px solid var(--dsw-alias-border-l1)}
+
+/* The project layer sits above the commit bar: a strip of every repository on
+   offer, so which one is current, and which are waiting, is readable without
+   scrolling or clicking. */
+.gv-projects{flex:0 0 auto;max-height:132px;overflow:auto;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.gv-project{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;border-radius:0;background:none;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;cursor:pointer}
+.gv-project:hover{background:var(--dsw-alias-bg-neutral-hover)}
+.gv-project.current{background:var(--dsw-alias-bg-neutral-active)}
+.gv-project.current .gv-project-name{font-weight:600}
+/* The dot carries the state and the dot alone: four different words beside it
+   would compete with a row that should be readable in one glance. */
+.gv-project-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
+.gv-project-dot.changed{background:var(--dsw-alias-label-secondary)}
+.gv-project-dot.ready{background:var(--dsw-alias-accent-base)}
+.gv-project-dot.conflict{background:var(--dsw-alias-state-error-primary)}
+.gv-project-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gv-project-branch{flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.gv-project-count{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.gv-project:focus-visible{outline:2px solid var(--dsw-alias-accent-base);outline-offset:-2px}
 `;

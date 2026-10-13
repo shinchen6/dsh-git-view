@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 
 import { postAction } from './api.js';
 import { t } from './i18n.js';
+import { ProjectLayer } from './projects.jsx';
 
 /** How long one model call may take before the view reports it as stuck. */
 const GENERATE_TIMEOUT_MS = 60_000;
@@ -16,7 +17,7 @@ const GENERATE_TIMEOUT_MS = 60_000;
  * @param {() => Promise<void>} refresh - re-read the status after a change.
  * @returns {object} the action runner, its busy flags, its last refusal, and the gate.
  */
-export function useActions(sessionId, refresh) {  const [busy, setBusy] = useState(false);
+export function useActions(sessionId, refresh, repo) {  const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [problem, setProblem] = useState(undefined);
   const [gate, setGate] = useState(undefined);
@@ -26,7 +27,7 @@ export function useActions(sessionId, refresh) {  const [busy, setBusy] = useSta
       setBusy(true);
       setProblem(undefined);
       try {
-        const answer = await postAction(sessionId, body);
+        const answer = await postAction(sessionId, body, repo);
         await refresh();
         return answer;
       } catch (error) {
@@ -36,7 +37,7 @@ export function useActions(sessionId, refresh) {  const [busy, setBusy] = useSta
         setBusy(false);
       }
     },
-    [sessionId, refresh],
+    [sessionId, refresh, repo],
   );
 
   /** Ask first, then run: for anything the user's next commit cannot undo. */
@@ -57,6 +58,7 @@ export function useActions(sessionId, refresh) {  const [busy, setBusy] = useSta
       const answer = await postAction(
         sessionId,
         { action: 'generateMessage' },
+        repo,
         AbortSignal.timeout(GENERATE_TIMEOUT_MS),
       );
       // A message the model could not finish, or one written from a
@@ -133,8 +135,17 @@ export function RiskGate({ gate, onDismiss, run }) {
  * @param {object} props - the staged set and the action runner.
  * @returns {React.ReactElement} the bar.
  */
-export function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo }) {
-  const [message, setMessage] = useState('');
+export function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, currentProject, onSelectProject }) {
+  // One draft per project, not one draft for the view: a message half-written
+  // for one repository must not be sitting in the box when another is current.
+  const [drafts, setDrafts] = useState(() => new Map());
+  const key = currentProject ?? '';
+  const message = drafts.get(key) ?? '';
+  const setMessage = value => setDrafts(current => {
+    const next = new Map(current);
+    next.set(key, value);
+    return next;
+  });
   const [wide, setWide] = useState(false);
   const idle = !busy && !generating;
   const committable = idle && staged.length > 0 && message.trim() !== '';
@@ -149,7 +160,9 @@ export function CommitBar({ staged, busy, generating, problem, run, generateMess
   };
 
   return (
-    <div className={`gv-commit${wide ? ' is-open' : ''}`}>
+    <>
+      <ProjectLayer projects={projects} current={currentProject} onSelect={onSelectProject} />
+      <div className={`gv-commit${wide ? ' is-open' : ''}`}>
       <div className="gv-commit-row">
         <textarea
           id="gv-commit-message"
@@ -210,7 +223,11 @@ export function CommitBar({ staged, busy, generating, problem, run, generateMess
           disabled={!committable}
           onClick={submit}
         >
-          <span aria-hidden="true">✓</span> {t('commit.submit')}
+          {/* The project is named on the button: the commit lands in the current
+              project, and on a wide workspace nothing else nearby says which. */}
+          <span aria-hidden="true">✓</span> {projectName === undefined
+            ? t('commit.submit')
+            : `${t('commit.submit')} · ${projectName}`}
         </button>
         {/* Enabled on its own terms: pushing does not depend on the message box
             being non-empty or anything being staged. */}
@@ -240,7 +257,8 @@ export function CommitBar({ staged, busy, generating, problem, run, generateMess
           {problem}
         </span>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

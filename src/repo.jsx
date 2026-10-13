@@ -117,7 +117,7 @@ export function RemoteActions({ repo, run, busy }) {
  * if git does and the Host reports git's own words either way.
  * @returns {React.ReactElement} the menu trigger.
  */
-export function BranchMenu({ sessionId, repo, run }) {
+export function BranchMenu({ sessionId, repo, run, repoPath }) {
   const [open, setOpen] = useState(false);
   const [roster, setRoster] = useState(undefined);
   const [creating, setCreating] = useState(false);
@@ -129,11 +129,11 @@ export function BranchMenu({ sessionId, repo, run }) {
     const controller = new AbortController();
     setRoster(undefined);
     setCreating(false);
-    readBranches(sessionId, controller.signal)
+    readBranches(sessionId, repoPath, controller.signal)
       .then(setRoster)
       .catch(error => setRoster({ error: error.message }));
     return () => controller.abort();
-  }, [sessionId, open]);
+  }, [sessionId, repoPath, open]);
 
   const locals = roster?.branches?.filter(branch => !branch.remote) ?? [];
   const remotes = roster?.branches?.filter(branch => branch.remote) ?? [];
@@ -250,7 +250,7 @@ export function BranchMenu({ sessionId, repo, run }) {
  * the only remaining copy of that work, so both go out to the confirmation gate.
  * @returns {React.ReactElement} the menu trigger and its list.
  */
-export function StashMenu({ sessionId, run, confirm }) {
+export function StashMenu({ sessionId, run, confirm, repoPath }) {
   const [open, setOpen] = useState(false);
   const [stashes, setStashes] = useState(undefined);
   const close = () => setOpen(false);
@@ -259,11 +259,11 @@ export function StashMenu({ sessionId, run, confirm }) {
     if (!open) return undefined;
     const controller = new AbortController();
     setStashes(undefined);
-    readStashes(sessionId, controller.signal)
+    readStashes(sessionId, repoPath, controller.signal)
       .then(answer => setStashes(answer.stashes))
       .catch(error => setStashes({ error: error.message }));
     return () => controller.abort();
-  }, [sessionId, open]);
+  }, [sessionId, repoPath, open]);
 
   return (
     <Menu

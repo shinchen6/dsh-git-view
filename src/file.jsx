@@ -142,7 +142,7 @@ export function FileView({ data, wrap, path }) {
  * @param {object} props - the served file, the path, and the status refresh.
  * @returns {React.ReactElement} the editor.
  */
-export function FileEditor({ data, path, sessionId, onSaved }) {
+export function FileEditor({ data, path, sessionId, onSaved, repoPath }) {
   const [buffer, setBuffer] = useState(data?.text ?? '');
   const [state, setState] = useState('idle');
   const [problem, setProblem] = useState(undefined);
@@ -160,14 +160,14 @@ export function FileEditor({ data, path, sessionId, onSaved }) {
     setState('saving');
     setProblem(undefined);
     try {
-      const answer = await writeFile(sessionId, path, buffer, data?.version);
+      const answer = await writeFile(sessionId, path, buffer, data?.version, repoPath);
       setState('saved');
       onSaved?.(answer);
     } catch (error) {
       setProblem(error.message);
       setState('idle');
     }
-  }, [state, sessionId, path, buffer, data?.version, onSaved]);
+  }, [state, sessionId, path, buffer, data?.version, onSaved, repoPath]);
 
   const dirty = data !== undefined && buffer !== data.text;
 

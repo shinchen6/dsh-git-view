@@ -9,7 +9,7 @@
  * Run with: node test/routes.test.mjs
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync, lstatSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import assert from 'node:assert/strict';
@@ -57,6 +57,21 @@ const fs = {
     return { type: info.isDirectory() ? 'directory' : 'file', size: info.size, version: `v${info.mtimeMs}-${info.size}` };
   },
   readBytes: async target => new Uint8Array(readFileSync(target.path)),
+  // Directory listing and a non-following stat of a single entry: the two calls
+  // repository discovery makes. Absent here, discovery would silently fall back
+  // to "only the enclosing repository" and these checks would prove nothing.
+  listDir: async target => readdirSync(target.path, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(entry => ({
+      name: entry.name,
+      type: entry.isDirectory() ? 'directory' : 'file',
+      target: { path: resolvePath(target.path, entry.name), displayPath: resolvePath(target.path, entry.name) },
+    })),
+  lstat: async (path, _opts) => {
+    const info = lstatSync(path);
+    return { type: info.isDirectory() ? 'directory' : 'file', size: info.size };
+  },
+  processPath: target => target.path,
   writeText: async (target, content, expected, signal, policy) => {
     // The real backend takes a tagged intent and a sandbox policy, and both
     // decide whether the write happens. Enforcing them here is what makes this
@@ -169,6 +184,24 @@ function post(body) {
       assert.equal(response.status, 200, `${JSON.stringify(body)} answered ${response.status}: ${text}`);
       return JSON.parse(text);
     });
+}
+
+/**
+ * Create a repository nested inside the scratch one, at a given relative path.
+ *
+ * @param {string} relative - directory under the scratch repository.
+ * @returns {string} the absolute path of the new repository.
+ */
+function nestedRepo(relative) {
+  const path = join(repo, relative);
+  mkdirSync(path, { recursive: true });
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: path });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: path });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: path });
+  writeFileSync(join(path, 'own.txt'), `own ${relative}\n`);
+  execFileSync('git', ['add', '-A'], { cwd: path });
+  execFileSync('git', ['commit', '-q', '-m', `init ${relative}`], { cwd: path });
+  return path;
 }
 
 try {
@@ -841,6 +874,73 @@ await check('a staged picture previews like any other', async () => {
     const escape = await call('/api/git.untracked', { sessionId: 's', dir: '../elsewhere/' });
     assert.equal(escape.status, 400);
   });
+
+  // Every check below works on one shared set of nested repositories, created
+  // once and removed at the end, because creating a repository is the slow part.
+  const near = nestedRepo('app-near');
+  const far = nestedRepo('group/deep/app-far');
+  const ignored = nestedRepo('node_modules/vendored');
+
+  try {
+    await check('repositories one level down are discovered, deeper ones are not', async () => {
+      const { status, body } = await call('/api/git.repositories', { sessionId: 's' });
+      assert.equal(status, 200);
+      const paths = body.repos.map(entry => entry.path);
+      assert.ok(paths.includes(resolvePath(repo)), 'the enclosing repository is offered');
+      assert.ok(paths.includes(near), 'a repository one level down is offered');
+      assert.ok(!paths.includes(far), 'a repository two levels down is not offered');
+    });
+
+    await check('node_modules is skipped even when it holds a repository', async () => {
+      const { body } = await call('/api/git.repositories', { sessionId: 's' });
+      assert.ok(!body.repos.some(entry => entry.path === ignored), 'a vendored repository is not offered');
+    });
+
+    await check('a clean repository is still listed, and says it is clean', async () => {
+      const { body } = await call('/api/git.repositories', { sessionId: 's' });
+      const entry = body.repos.find(item => item.path === near);
+      assert.ok(entry, 'the clean repository is present');
+      assert.equal(entry.branch, 'main');
+      assert.equal(entry.clean, true);
+      assert.equal(entry.staged, 0);
+    });
+
+    await check('a repository with staged work is marked as having something to commit', async () => {
+      writeFileSync(join(near, 'pending.txt'), 'ready to commit\n');
+      execFileSync('git', ['add', 'pending.txt'], { cwd: near });
+      const { body } = await call('/api/git.repositories', { sessionId: 's' });
+      const entry = body.repos.find(item => item.path === near);
+      assert.equal(entry.clean, false);
+      assert.equal(entry.staged, 1, 'the staged file is counted');
+    });
+
+    await check('naming a discovered repository switches which one is served', async () => {
+      const switched = await call('/api/git.status', { sessionId: 's', repo: near });
+      assert.equal(switched.status, 200);
+      assert.equal(switched.body.repo.root, near);
+      // The nested repository has its own staged change and no trace of the
+      // enclosing one, which is what makes it a separate project rather than a
+      // view onto the same files.
+      assert.ok(switched.body.staged.some(file => file.path === 'pending.txt'));
+      const enclosing = await call('/api/git.status', { sessionId: 's' });
+      assert.notEqual(enclosing.body.repo.root, near, 'omitting repo keeps the enclosing one');
+    });
+
+    await check('a repository the scan never offered is refused', async () => {
+      // The allowlist is the whole boundary: without it, any path the browser
+      // could name would be a repository this session may read.
+      const outside = await call('/api/git.status', { sessionId: 's', repo: tmpdir() });
+      assert.equal(outside.status, 200);
+      assert.equal(outside.body.repo.root, resolvePath(repo), 'an unknown repo falls back rather than being served');
+
+      const traversal = await call('/api/git.status', { sessionId: 's', repo: `${repo}/app-near/../..` });
+      assert.equal(traversal.body.repo.root, resolvePath(repo), 'a path spelled with .. cannot select another repository');
+    });
+  } finally {
+    rmSync(join(repo, 'app-near'), { recursive: true, force: true });
+    rmSync(join(repo, 'group'), { recursive: true, force: true });
+    rmSync(join(repo, 'node_modules'), { recursive: true, force: true });
+  }
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }

@@ -14,6 +14,8 @@ export const inject = ['connection', 'sessions', 'subprocess', 'fs'];
 
 /** Authenticated GET route serving branch facts and the working-tree file groups. */
 const STATUS_PATH = '/api/git.status';
+/** Authenticated GET route listing every repository the session may point at. */
+const REPOSITORIES_PATH = '/api/git.repositories';
 /** Authenticated GET route serving the contents of one untracked directory. */
 const UNTRACKED_PATH = '/api/git.untracked';
 /** Authenticated GET route serving one file's comparison on the requested side. */
@@ -49,6 +51,30 @@ const DIFF_MAX_LINES = 20_000;
 const OUTGOING_MAX = 50;
 /** Largest number of stash entries one answer lists. */
 const MAX_STASHES = 50;
+
+/**
+ * Repository discovery. The working directory's direct children are the only
+ * places a nested repository is looked for, matching how editors scan: one level
+ * deep, so a repository buried deeper stays out until something asks for it.
+ *
+ * Finding them costs no git at all. A directory carrying a `.git` entry is a
+ * repository root by definition, so one listing plus one `lstat` per child is
+ * the entire scan; whether a candidate actually answers git is settled by the
+ * status call that has to happen anyway.
+ */
+const REPO_SCAN_IGNORED = new Set(['node_modules']);
+const REPO_MAX = 50;
+
+/**
+ * The shared deadline for asking every candidate. They are asked in parallel and
+ * whatever has not answered by then is reported as unknown rather than holding
+ * the panel: a partial answer now beats a complete one after the user has given
+ * up. The next refresh fills the rest in.
+ */
+const REPO_SCAN_BUDGET_MS = 2_500;
+
+/** How long a candidate set is reused before the workspace is scanned again. */
+const REPO_VALIDATE_TTL_MS = 10_000;
 
 /** The byte text never carries; its presence marks content as binary. */
 const NUL = String.fromCharCode(0);
@@ -95,6 +121,192 @@ async function locateRepository(git, cwd, signal) {
   if (found.exitCode !== 0) return null;
   const root = found.stdout.trim();
   return root === '' ? null : resolvePath(cwd, root);
+}
+
+/**
+ * Every repository this session may point at: the one enclosing the working
+ * directory, plus those nested directly below it.
+ *
+ * Paths come back canonical, because this set doubles as the allowlist every
+ * other route checks against — comparing these strings is what stops a request
+ * from naming a directory the scan never offered.
+ *
+ * @param {object} ctx - the plugin context.
+ * @param {GitRunner} git - command runner.
+ * @param {string} cwd - absolute session working directory.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<string[]>} candidate roots, the enclosing one first.
+ */
+async function discoverRepositories(ctx, git, cwd, signal) {
+  // Walking up is the one git call discovery needs: the enclosing repository may
+  // be an ancestor, not the working directory itself.
+  const enclosing = await locateRepository(git, cwd, signal);
+  const roots = enclosing === null ? [resolvePath(cwd, '.')] : [enclosing];
+
+  const base = await ctx.fs.resolve(cwd, { signal });
+  if (!base) return roots;
+
+  let entries = [];
+  try {
+    entries = await ctx.fs.listDir(base, signal);
+  } catch {
+    // A directory that cannot be listed still offers its own repository.
+    return roots;
+  }
+
+  const nested = await Promise.all(
+    entries
+      .filter(entry => entry.type === 'directory' && !REPO_SCAN_IGNORED.has(entry.name))
+      .slice(0, REPO_MAX)
+      .map(async entry => {
+        try {
+          // lstat does not follow the final component, so a `.git` symlink is
+          // found without being read through.
+          const dotGit = await ctx.fs.lstat(join(entry.target.displayPath, '.git'), {}, signal);
+          return dotGit === undefined ? null : ctx.fs.processPath(entry.target);
+        } catch {
+          return null;
+        }
+      }),
+  );
+
+  const seen = new Set(roots);
+  for (const path of nested) {
+    if (path === null || seen.has(path)) continue;
+    seen.add(path);
+    roots.push(path);
+    if (roots.length >= REPO_MAX) break;
+  }
+  return roots;
+}
+
+/**
+ * Compare two absolute paths that may differ in separator style, trailing
+ * separator, or letter case.
+ * @param {string} a - one absolute path.
+ * @param {string} b - another absolute path.
+ * @returns {boolean} true when both name the same directory.
+ */
+export function samePath(a, b) {
+  const fold = value => resolvePath(value, '.').replace(/[\\/]+$/, '').toLowerCase();
+  return fold(a) === fold(b);
+}
+
+/** Candidate sets by working directory, reused briefly between polls. */
+const candidateCache = new Map();
+
+/**
+ * The candidate set, cached so the per-request allowlist check does not rescan
+ * the workspace on every status poll.
+ * @param {object} ctx - the plugin context.
+ * @param {GitRunner} git - command runner.
+ * @param {string} cwd - absolute session working directory.
+ * @param {AbortSignal} signal - cancellation.
+ * @param {boolean} [force] - rescan instead of reading the cache.
+ * @returns {Promise<{ at: number, paths: string[] }>} the candidate roots.
+ */
+async function candidatesFor(ctx, git, cwd, signal, force = false) {
+  const cached = candidateCache.get(cwd);
+  if (!force && cached !== undefined && Date.now() - cached.at < REPO_VALIDATE_TTL_MS) return cached;
+
+  const paths = await discoverRepositories(ctx, git, cwd, signal);
+  const fresh = { at: Date.now(), paths };
+  candidateCache.set(cwd, fresh);
+  return fresh;
+}
+
+/**
+ * Choose the repository a request addresses.
+ *
+ * Omitting `repo` keeps today's behaviour: the repository enclosing the working
+ * directory. Naming one is honoured only when the server itself offered it, so a
+ * request cannot reach a directory the browser never saw. A cached set that does
+ * not contain the named path is not trusted to reject it — a repository created
+ * since the scan must still be reachable — so the scan is repeated once first.
+ *
+ * @param {object} ctx - the plugin context.
+ * @param {GitRunner} git - command runner.
+ * @param {string} cwd - absolute session working directory.
+ * @param {URLSearchParams} query - the request query.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<string>} the root to operate on.
+ */
+async function resolveRepository(ctx, git, cwd, query, signal) {
+  const requested = query.get('repo');
+  let cached = await candidatesFor(ctx, git, cwd, signal);
+
+  if (requested !== null) {
+    let chosen = cached.paths.find(path => samePath(path, requested));
+    if (chosen === undefined) {
+      cached = await candidatesFor(ctx, git, cwd, signal, true);
+      chosen = cached.paths.find(path => samePath(path, requested));
+    }
+    if (chosen !== undefined) return chosen;
+  }
+  return cached.paths[0];
+}
+
+/**
+ * Each candidate's summary, all asked in parallel under one shared deadline.
+ * @param {GitRunner} git - command runner.
+ * @param {string[]} paths - candidate roots.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<{ repos: object[], unknown: string[] }>} summaries and unanswered paths.
+ */
+async function summariseRepositories(git, paths, signal) {
+  const deadline = AbortSignal.timeout(REPO_SCAN_BUDGET_MS);
+  const shared = signal === undefined ? deadline : AbortSignal.any([signal, deadline]);
+
+  const settled = await Promise.all(paths.map(async path => {
+    try {
+      const result = await git.ok(
+        ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=normal'],
+        { cwd: path, signal: shared },
+      );
+      const { branch, entries } = parsePorcelainV2(result.stdout);
+      const summary = {
+        path,
+        name: path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path,
+        branch: branch.name,
+        unborn: branch.unborn,
+        detached: branch.detached,
+        oid: branch.oid,
+        ahead: branch.ahead,
+        behind: branch.behind,
+        staged: entries.filter(entry => entry.staged && !entry.conflict).length,
+        unstaged: entries.filter(entry => entry.unstaged && !entry.conflict).length,
+        conflicts: entries.filter(entry => entry.conflict).length,
+        untracked: entries.filter(entry => entry.status === '?').length,
+      };
+      summary.clean = summary.staged === 0 && summary.unstaged === 0 &&
+        summary.conflicts === 0 && summary.untracked === 0;
+      return { path, summary };
+    } catch {
+      // A candidate that could not answer is a different fact from one with no
+      // changes, so it is reported rather than quietly dropped.
+      return { path, summary: null };
+    }
+  }));
+
+  return {
+    repos: settled.filter(item => item.summary !== null).map(item => item.summary),
+    unknown: settled.filter(item => item.summary === null).map(item => item.path),
+  };
+}
+
+/** Handle `/api/git.repositories`. */
+async function handleRepositories(ctx, git, request) {
+  const query = new URL(request.url).searchParams;
+  const session = resolveSession(ctx, query);
+  if (session instanceof Response) return session;
+  if ((await git.resolve(request.signal)) === null) return fail('git is not available on this host.', 503);
+
+  // Forced, not cached: this route exists to report what is there now, and a
+  // list a repository just created is missing from is worse than a rescan.
+  const paths = (await candidatesFor(ctx, git, session.cwd, request.signal, true)).paths;
+  const { repos, unknown } = await summariseRepositories(git, paths, request.signal);
+
+  return json({ cwd: session.cwd, repos, unknown, truncated: paths.length > REPO_MAX });
 }
 
 /**
@@ -199,7 +411,7 @@ class GitRunner {
  */
 export function parsePorcelainV2(text) {
   const fields = text.split(NUL);
-  const branch = { name: null, oid: null, upstream: null, ahead: 0, behind: 0, detached: false };
+  const branch = { name: null, oid: null, upstream: null, ahead: 0, behind: 0, detached: false, unborn: false };
   const entries = [];
   for (let index = 0; index < fields.length; index += 1) {
     const field = fields[index];
@@ -209,8 +421,12 @@ export function parsePorcelainV2(text) {
       const space = field.indexOf(' ', 2);
       const key = field.slice(2, space);
       const value = field.slice(space + 1);
-      if (key === 'branch.oid') branch.oid = value;
-      else if (key === 'branch.head') {
+      // A repository with no commits reports the literal `(initial)`, which is
+      // not an object id; naming that an oid would render as a broken commit.
+      if (key === 'branch.oid') {
+        if (value === '(initial)') branch.unborn = true;
+        else branch.oid = value;
+      } else if (key === 'branch.head') {
         if (value === '(detached)') branch.detached = true;
         else branch.name = value;
       } else if (key === 'branch.upstream') branch.upstream = value;
@@ -474,6 +690,10 @@ function groupFiles(entries, stagedCounts, unstagedCounts) {
 
 /**
  * Shared prologue: answer the two states the browser renders as empty views.
+ *
+ * The repository is the one the browser named, when the server offered it in its
+ * scan, and otherwise the one enclosing the working directory.
+ *
  * @param {object} ctx - the plugin context.
  * @param {GitRunner} git - the repository runner.
  * @param {Request} request - the route request.
@@ -484,8 +704,8 @@ async function prepare(ctx, git, request) {
   const session = resolveSession(ctx, query);
   if (session instanceof Response) return session;
   if ((await git.resolve(request.signal)) === null) return fail('git is not available on this host.', 503);
-  const root = await locateRepository(git, session.cwd, request.signal);
-  if (root === null) return fail('Not inside a git repository.', 409);
+  const root = await resolveRepository(ctx, git, session.cwd, query, request.signal);
+  if (root === undefined) return fail('Not inside a git repository.', 409);
   return { root, sessionId: session.sessionId };
 }
 
@@ -1139,6 +1359,7 @@ export function apply(ctx) {
   ctx.effect(() => async () => lifetime.abort());
 
   const routes = [
+    [REPOSITORIES_PATH, ['GET'], handleRepositories],
     [STATUS_PATH, ['GET'], handleStatus],
     [UNTRACKED_PATH, ['GET'], handleUntracked],
     [DIFF_PATH, ['GET'], handleDiff],

@@ -9,6 +9,17 @@ import { tOr } from './i18n.js';
 const NO_STORE = { cache: 'no-store' };
 
 /**
+ * Query parameters naming the session and, when the view has moved to another
+ * project, that project. Leaving `repo` out asks for the repository enclosing
+ * the working directory, which is the one the panel opens on.
+ *
+ * @param {string} sessionId - the session whose working directory is addressed.
+ * @param {string | undefined} repo - absolute path of the project being read.
+ * @returns {Record<string, string>} the parameters.
+ */
+const scope = (sessionId, repo) => (repo === undefined ? { sessionId } : { sessionId, repo });
+
+/**
  * One GET against a git route.
  * @param {string} path - Route path below `/api`.
  * @param {Record<string, string>} params - Query parameters.
@@ -45,23 +56,26 @@ export class GitError extends Error {
 }
 
 /** Branch facts and the working-tree file groups. */
-export const readStatus = (sessionId, signal) => get('/api/git.status', { sessionId }, signal);
+export const readStatus = (sessionId, repo, signal) => get('/api/git.status', scope(sessionId, repo), signal);
+
+/** Every repository this session may point at, each with a summary of its state. */
+export const readRepositories = (sessionId, signal) => get('/api/git.repositories', { sessionId }, signal);
 
 /** One file's comparison on the requested side. */
-export const readDiff = (sessionId, path, side, signal) =>
-  get('/api/git.diff', { sessionId, path, side }, signal);
+export const readDiff = (sessionId, path, side, repo, signal) =>
+  get('/api/git.diff', { ...scope(sessionId, repo), path, side }, signal);
 
 /**
  * What is inside one untracked directory.
  * Scoped to that directory, so the cost is that directory rather than the
  * repository; this is how the closed directory is opened.
  */
-export const readUntracked = (sessionId, dir, signal) =>
-  get('/api/git.untracked', { sessionId, dir }, signal);
+export const readUntracked = (sessionId, dir, repo, signal) =>
+  get('/api/git.untracked', { ...scope(sessionId, repo), dir }, signal);
 
 /** One file's complete content on the requested side. */
-export const readFile = (sessionId, path, side, signal) =>
-  get('/api/git.file', { sessionId, path, side }, signal);
+export const readFile = (sessionId, path, side, repo, signal) =>
+  get('/api/git.file', { ...scope(sessionId, repo), path, side }, signal);
 
 /**
  * Save one working-tree file.
@@ -73,8 +87,8 @@ export const readFile = (sessionId, path, side, signal) =>
  * @param {string | undefined} version - the version the text was read at.
  * @returns {Promise<any>} the new version, or the message it refused with.
  */
-export async function writeFile(sessionId, path, content, version) {
-  const response = await fetch(`/api/git.write?sessionId=${encodeURIComponent(sessionId)}`, {
+export async function writeFile(sessionId, path, content, version, repo) {
+  const response = await fetch(`/api/git.write?${new URLSearchParams(scope(sessionId, repo))}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     ...NO_STORE,
@@ -90,10 +104,10 @@ export async function writeFile(sessionId, path, content, version) {
 }
 
 /** Local branches and their remote-tracking branches. */
-export const readBranches = (sessionId, signal) => get('/api/git.branches', { sessionId }, signal);
+export const readBranches = (sessionId, repo, signal) => get('/api/git.branches', scope(sessionId, repo), signal);
 
 /** The repository's stash list. */
-export const readStashes = (sessionId, signal) => get('/api/git.stashes', { sessionId }, signal);
+export const readStashes = (sessionId, repo, signal) => get('/api/git.stashes', scope(sessionId, repo), signal);
 
 /**
  * Run one repository action.
@@ -104,8 +118,8 @@ export const readStashes = (sessionId, signal) => get('/api/git.stashes', { sess
  *   can be bounded instead of hanging until the tab closes.
  * @returns {Promise<any>} git's own answer, or the message it refused with.
  */
-export async function postAction(sessionId, body, signal) {
-  const response = await fetch(`/api/git.action?sessionId=${encodeURIComponent(sessionId)}`, {
+export async function postAction(sessionId, body, repo, signal) {
+  const response = await fetch(`/api/git.action?${new URLSearchParams(scope(sessionId, repo))}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     ...NO_STORE,
