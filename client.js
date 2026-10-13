@@ -365,7 +365,7 @@ var GitError = class extends Error {
   }
 };
 var readStatus = (sessionId, repo, signal) => get("/api/git.status", scope(sessionId, repo), signal);
-var readRepositories = (sessionId, signal) => get("/api/git.repositories", { sessionId }, signal);
+var readRepositories = (sessionId, fresh, signal) => get("/api/git.repositories", fresh ? { sessionId, fresh: "1" } : { sessionId }, signal);
 var readSummaries = (sessionId, signal) => get("/api/git.summaries", { sessionId }, signal);
 var readDiff = (sessionId, path, side, repo, signal) => get("/api/git.diff", { ...scope(sessionId, repo), path, side }, signal);
 var readUntracked = (sessionId, dir, repo, signal) => get("/api/git.untracked", { ...scope(sessionId, repo), dir }, signal);
@@ -2571,7 +2571,7 @@ function GitView({ sessionId, useSessionStatus }) {
   }, [running]);
   (0, import_react7.useEffect)(() => {
     const controller = new AbortController();
-    readRepositories(sessionId, controller.signal).then((answer) => {
+    readRepositories(sessionId, reload > 0, controller.signal).then((answer) => {
       setProjects(answer.projects);
       setFailure(void 0);
       setProjectPath(

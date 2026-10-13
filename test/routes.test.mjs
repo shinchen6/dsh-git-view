@@ -33,21 +33,22 @@ const gitPath = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which
 const gitCalls = [];
 
 /**
- * How many status scans the routes have run.
+ * The working directories a status scan has been run in, in order.
  *
  * Matched on the whole recorded command line: the first argument is the git
  * executable's path, so a prefix test against `status` never matches anything
  * and would let a cache test pass without a single call being counted.
  *
- * @returns {number} the number of status invocations so far.
+ * @returns {string[]} the directories scanned so far.
  */
-const statusCalls = () => gitCalls.filter(line => /(^|\s)status --porcelain=v2/.test(line)).length;
+const scannedDirs = () =>
+  gitCalls.filter(call => /(^|\s)status --porcelain=v2/.test(call.line)).map(call => call.cwd);
 
 /** The subprocess capability, backed by real git through spawnSync. */
 const subprocess = {
   resolveExecutable: () => Promise.resolve(gitPath),
   spawn(spec) {
-    gitCalls.push(spec.argv.join(' '));
+    gitCalls.push({ line: spec.argv.join(' '), cwd: spec.cwd });
     const result = spawnSync(spec.argv[0], spec.argv.slice(1), {
       cwd: spec.cwd,
       env: { ...process.env, ...spec.env },
@@ -925,7 +926,7 @@ await check('a staged picture previews like any other', async () => {
 
   try {
     await check('repositories one level down are discovered, deeper ones are not', async () => {
-      const { status, body } = await call('/api/git.repositories', { sessionId: 's' });
+      const { status, body } = await call('/api/git.repositories', { sessionId: 's', fresh: '1' });
       assert.equal(status, 200);
       const paths = body.projects.map(entry => entry.path);
       assert.ok(paths.includes(resolvePath(repo)), 'the enclosing repository is offered');
@@ -936,15 +937,32 @@ await check('a staged picture previews like any other', async () => {
 
     await check('the project list costs no git, so it can carry no state', async () => {
       // This is the property that keeps the panel off the critical path: listing
-      // thirteen repositories takes milliseconds, summarising them takes seconds.
-      const { body } = await call('/api/git.repositories', { sessionId: 's' });
+      // repositories costs one walk, summarising them costs a status call each.
+      const { body } = await call('/api/git.repositories', { sessionId: 's', fresh: '1' });
       assert.equal(body.summaries, undefined, 'the list reports names, not status');
       for (const entry of body.projects) assert.equal(entry.staged, undefined);
     });
 
     await check('node_modules is skipped even when it holds a repository', async () => {
-      const { body } = await call('/api/git.repositories', { sessionId: 's' });
+      const { body } = await call('/api/git.repositories', { sessionId: 's', fresh: '1' });
       assert.ok(!body.projects.some(entry => entry.path === ignored), 'a vendored repository is not offered');
+    });
+
+    await check('a refresh rescans the workspace, a plain read does not', async () => {
+      // Walking a wide workspace costs a listing plus one lstat per child, which
+      // measured 2.6 s here. So the list is reused until a refresh asks for what
+      // is there now — which is how a repository created since the last scan
+      // becomes visible without every poll paying for the walk again.
+      await call('/api/git.repositories', { sessionId: 's', fresh: '1' });
+      const late = nestedRepo('app-late');
+      try {
+        const plain = await call('/api/git.repositories', { sessionId: 's' });
+        assert.ok(!plain.body.projects.some(entry => entry.path === late), 'a plain read reuses the last scan');
+        const refreshed = await call('/api/git.repositories', { sessionId: 's', fresh: '1' });
+        assert.ok(refreshed.body.projects.some(entry => entry.path === late), 'a refresh finds it');
+      } finally {
+        rmSync(late, { recursive: true, force: true });
+      }
     });
 
     await check('a clean repository is still listed, and its summary says it is clean', async () => {
@@ -979,24 +997,30 @@ await check('a staged picture previews like any other', async () => {
 
     await check('asking twice costs one set of status calls', async () => {
       // The panel asks again every time someone picks a different project, and
-      // on a wide working directory that is seconds of repeated work.
-      await call('/api/git.summaries', { sessionId: 's' });
-      const before = statusCalls();
-      assert.ok(before > 0, 'the first answer really did run status');
+      // on a wide working directory that is seconds of repeated work. Only the
+      // repositories that failed to answer may be asked again: remembering a
+      // timeout would keep the repository it belongs to silent for good.
+      const first = await call('/api/git.summaries', { sessionId: 's' });
+      const asked = new Set(scannedDirs().slice(-(first.body.summaries.length + first.body.unknown.length)));
+      const before = scannedDirs().length;
       const { body } = await call('/api/git.summaries', { sessionId: 's' });
-      assert.equal(statusCalls(), before, 'the second answer costs no status calls');
-      assert.equal(body.cached, body.summaries.length, 'and is reported as answered from cache');
+      const again = scannedDirs().slice(before);
+      for (const cwd of again) {
+        assert.ok(first.body.unknown.includes(cwd), `${cwd} answered the first time and was asked again`);
+      }
+      assert.equal(body.cached, first.body.summaries.length, 'every repository that answered is served from cache');
+      assert.ok(asked.size > 0, 'the first answer really did run status');
     });
 
     await check('staging something drops that repository from the cache', async () => {
       // A cached marker that outlives the change it describes is the one way
       // caching here can tell a lie.
       await call('/api/git.summaries', { sessionId: 's' });
-      const before = statusCalls();
+      const before = scannedDirs().length;
       writeFileSync(join(near, 'fresh.txt'), 'just written\n');
       await postIn(near, { action: 'stage', paths: ['fresh.txt'] });
       const { body } = await call('/api/git.summaries', { sessionId: 's' });
-      assert.ok(statusCalls() > before, 'the repository that changed is asked again');
+      assert.ok(scannedDirs().slice(before).includes(near), 'the repository that changed is asked again');
       const entry = body.summaries.find(item => item.path === near);
       assert.ok(entry.staged >= 1, 'and its answer reflects the change');
     });

@@ -491,7 +491,10 @@ export function GitView({ sessionId, useSessionStatus }) {
   // calls are still in flight.
   useEffect(() => {
     const controller = new AbortController();
-    readRepositories(sessionId, controller.signal)
+    // Walking a wide workspace costs a listing plus one lstat per child, which
+    // measured 2.6 s here. It is paid when the panel opens and when a refresh is
+    // asked for, never on a poll of a workspace that has not changed.
+    readRepositories(sessionId, reload > 0, controller.signal)
       .then(answer => {
         setProjects(answer.projects);
         setFailure(undefined);

@@ -163,7 +163,8 @@ async function locateRepository(git, cwd, signal) {
  * @param {GitRunner} git - command runner.
  * @param {string} cwd - absolute session working directory.
  * @param {AbortSignal} signal - cancellation.
- * @returns {Promise<string[]>} candidate roots, the enclosing one first.
+ * @returns {Promise<{ paths: string[], complete: boolean }>} candidate roots, the
+ *   enclosing one first, and whether the workspace was actually walked.
  */
 async function discoverRepositories(ctx, git, cwd, signal) {
   // Walking up is the one git call discovery needs: the enclosing repository may
@@ -172,14 +173,18 @@ async function discoverRepositories(ctx, git, cwd, signal) {
   const roots = enclosing === null ? [resolvePath(cwd, '.')] : [enclosing];
 
   const base = await ctx.fs.resolve(cwd, { signal });
-  if (!base) return roots;
+  if (!base) return { paths: roots, complete: false };
 
-  let entries = [];
+  let entries;
   try {
     entries = await ctx.fs.listDir(base, signal);
   } catch {
-    // A directory that cannot be listed still offers its own repository.
-    return roots;
+    // Reported as an incomplete scan rather than as a directory with nothing
+    // nested in it. The two look the same in the answer and are not the same
+    // fact: one may be remembered, and the other must not be, or a listing that
+    // failed once leaves the workspace looking empty for as long as it is
+    // cached.
+    return { paths: roots, complete: false };
   }
 
   const nested = await Promise.all(
@@ -193,6 +198,8 @@ async function discoverRepositories(ctx, git, cwd, signal) {
           const dotGit = await ctx.fs.lstat(join(entry.target.displayPath, '.git'), {}, signal);
           return dotGit === undefined ? null : ctx.fs.processPath(entry.target);
         } catch {
+          // One child that cannot be inspected is one repository missing from
+          // the list, not a failed scan: the rest of the listing still stands.
           return null;
         }
       }),
@@ -205,7 +212,7 @@ async function discoverRepositories(ctx, git, cwd, signal) {
     roots.push(path);
     if (roots.length >= REPO_MAX) break;
   }
-  return roots;
+  return { paths: roots, complete: true };
 }
 
 /**
@@ -247,9 +254,18 @@ async function candidatesFor(ctx, git, cwd, signal, force = false) {
   const cached = candidateCache.get(cwd);
   if (!force && cached !== undefined && Date.now() - cached.at < REPO_VALIDATE_TTL_MS) return cached;
 
-  const paths = await discoverRepositories(ctx, git, cwd, signal);
-  const fresh = { at: Date.now(), paths };
-  candidateCache.set(cwd, fresh);
+  // Stamped when the scan starts, not when it ends: two requests can scan at
+  // once and the one that finishes last is not necessarily the one that started
+  // last, so completion order is the wrong thing to order the cache by.
+  const startedAt = Date.now();
+  const found = await discoverRepositories(ctx, git, cwd, signal);
+  const fresh = { at: startedAt, paths: found.paths };
+
+  const held = candidateCache.get(cwd);
+  const beaten = held !== undefined && held.at > startedAt;
+  // A scan that was abandoned part-way is not an answer, and neither is one
+  // overtaken by a scan that began after it.
+  if (found.complete && !beaten && signal?.aborted !== true) candidateCache.set(cwd, fresh);
   return fresh;
 }
 
@@ -367,9 +383,12 @@ async function handleRepositories(ctx, git, request) {
   if (session instanceof Response) return session;
   if ((await git.resolve(request.signal)) === null) return fail('git is not available on this host.', 503);
 
-  // Forced, not cached: this route exists to report what is there now, and a
-  // list a repository just created is missing from is worse than a rescan.
-  const paths = (await candidatesFor(ctx, git, session.cwd, request.signal, true)).paths;
+  // Rescanned only when the refresh was asked for. Walking a wide working
+  // directory costs a listing plus one lstat per child, which measured 2.6 s
+  // cold here — worth paying to answer "what is there now", not worth paying
+  // again on every poll of a workspace that has not changed.
+  const force = query.get('fresh') === '1';
+  const paths = (await candidatesFor(ctx, git, session.cwd, request.signal, force)).paths;
 
   // Names come from the paths themselves. Asking git for each repository's
   // state here would put a status call per repository in front of the first

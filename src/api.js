@@ -62,9 +62,17 @@ export const readStatus = (sessionId, repo, signal) => get('/api/git.status', sc
  * Every repository this session may point at, by name.
  *
  * Answered from a filesystem scan alone, so the panel can list its projects
- * without waiting on a single git process.
+ * without waiting on a single git process. `fresh` asks for the workspace to be
+ * walked again rather than read from the scan already in hand — which is what
+ * an explicit refresh means, and what mounting the panel does not.
+ *
+ * @param {string} sessionId - the session whose working directory to scan.
+ * @param {boolean} fresh - rescan instead of reusing the last scan.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<{ cwd: string, projects: object[], truncated: boolean }>} the projects.
  */
-export const readRepositories = (sessionId, signal) => get('/api/git.repositories', { sessionId }, signal);
+export const readRepositories = (sessionId, fresh, signal) =>
+  get('/api/git.repositories', fresh ? { sessionId, fresh: '1' } : { sessionId }, signal);
 
 /**
  * How much is waiting in each of them.
