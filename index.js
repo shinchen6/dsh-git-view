@@ -170,7 +170,13 @@ async function discoverRepositories(ctx, git, cwd, signal) {
   // Walking up is the one git call discovery needs: the enclosing repository may
   // be an ancestor, not the working directory itself.
   const enclosing = await locateRepository(git, cwd, signal);
-  const roots = enclosing === null ? [resolvePath(cwd, '.')] : [enclosing];
+
+  // A working directory that is not inside a repository contributes nothing.
+  // Listing it anyway put a row on screen for a directory that had no history
+  // at all, which reads as a project that has never been committed and cannot
+  // be: the status route says plainly that it is not a repository, and the
+  // project list should not contradict it.
+  const roots = enclosing === null ? [] : [enclosing];
 
   const base = await ctx.fs.resolve(cwd, { signal });
   if (!base) return { paths: roots, complete: false };
@@ -394,9 +400,17 @@ async function handleRepositories(ctx, git, request) {
   // state here would put a status call per repository in front of the first
   // paint, and on a wide working directory those take seconds; the markers
   // arrive separately, so a project is listed from the moment it is found.
+  //
+  // The first entry is the repository the session sits inside, and it is named
+  // by its whole path while every nested project is named by its folder. Two
+  // rows reading `app` otherwise leave no way to tell which one the session is
+  // working in, which is the one question the row cannot be ambiguous about.
   return json({
     cwd: session.cwd,
-    projects: paths.map(path => ({ path, name: path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path })),
+    projects: paths.map((path, index) => ({
+      path,
+      name: index === 0 ? path : (path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path),
+    })),
     truncated: paths.length > REPO_MAX,
   });
 }

@@ -22,7 +22,8 @@ const repo = mkdtempSync(join(tmpdir(), 'dsh-git-view-routes-'));
 const routes = new Map();
 
 /** A session store that always reports the scratch repository. */
-const sessions = { get: () => ({ header: { cwd: repo } }) };
+const sessionCwds = { s: repo };
+const sessions = { get: id => ({ header: { cwd: sessionCwds[id] } }) };
 
 /** The absolute path to the real git, as a subprocess provider would resolve it. */
 const gitPath = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['git'], { encoding: 'utf8' })
@@ -984,6 +985,46 @@ await check('a staged picture previews like any other', async () => {
       const entry = body.summaries.find(item => item.path === near);
       assert.equal(entry.clean, false);
       assert.equal(entry.staged, 1, 'the staged file is counted');
+    });
+
+    await check('the repository the session sits in is named by its whole path', async () => {
+      // Nested projects are named by their folder, which is all they have. The
+      // one the session is working in needs its whole path, or two rows reading
+      // `app` leave no way to tell which is this session's.
+      const { body } = await call('/api/git.repositories', { sessionId: 's', fresh: '1' });
+      const [first, ...rest] = body.projects;
+      assert.equal(first.path, resolvePath(repo));
+      assert.equal(first.name, resolvePath(repo), 'the enclosing repository is named in full');
+      for (const entry of rest) {
+        assert.ok(!entry.name.includes('\\') && !entry.name.includes('/'), `${entry.name} is a folder name`);
+      }
+    });
+
+    await check('the session\'s own repository is one of the projects', async () => {
+      // The directory the session is sitting in is the project the person is
+      // working on, and it is listed like any other rather than being implied.
+      const { body } = await call('/api/git.repositories', { sessionId: 's', fresh: '1' });
+      assert.ok(
+        body.projects.some(entry => entry.path === resolvePath(repo)),
+        'the working directory has its own row',
+      );
+    });
+
+    await check('a directory that is not a repository is never listed as a project', async () => {
+      // Listing it would put a row on screen for a directory with no history,
+      // which reads as a project that has never been committed — while the
+      // status route is saying it is not a repository at all.
+      const bare = mkdtempSync(join(tmpdir(), 'dsh-git-view-bare-'));
+      try {
+        sessionCwds.bare = bare;
+        const list = await call('/api/git.repositories', { sessionId: 'bare', fresh: '1' });
+        assert.deepEqual(list.body.projects, [], 'a plain directory contributes no project');
+        const status = await call('/api/git.status', { sessionId: 'bare' });
+        assert.equal(status.status, 409, 'and the status route still says it is not a repository');
+      } finally {
+        delete sessionCwds.bare;
+        rmSync(bare, { recursive: true, force: true });
+      }
     });
 
     await check('a repository that cannot answer costs only its own summary', async () => {
