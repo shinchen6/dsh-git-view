@@ -39,9 +39,13 @@ var zh = {
   "projects.reading": "\u8BFB\u53D6\u4E2D\u2026",
   "projects.quietCount": "{count} \u4E2A\u5E72\u51C0\u9879\u76EE",
   "projects.detached": "\u6E38\u79BB HEAD",
-  "projects.stagedCount": "\u53EF\u63D0\u4EA4 {count}",
-  "projects.unstagedCount": "\u5DF2\u6682\u5B58 {count}",
-  "projects.untrackedCount": "\u5DF2\u6682\u5B58 0 \xB7 \u672A\u8DDF\u8E2A {count}",
+  // The three counts name the three groups above them, in the same words, so a
+  // row and the section it summarises cannot be read as disagreeing. The
+  // unstaged one used to read 已暂存 — "staged" — which said the opposite of
+  // what it counted, on the row whose whole job is to say what is waiting.
+  "projects.stagedCount": "\u5DF2\u6682\u5B58 {count}",
+  "projects.unstagedCount": "\u672A\u6682\u5B58 {count}",
+  "projects.untrackedCount": "\u672A\u8DDF\u8E2A {count}",
   "group.conflicts": "\u51B2\u7A81",
   "group.staged": "\u6682\u5B58\u7684\u66F4\u6539",
   "group.unstaged": "\u66F4\u6539",
@@ -79,6 +83,12 @@ var zh = {
   "action.cancel": "\u53D6\u6D88",
   "action.close": "\u5173\u95ED",
   "action.confirm": "\u786E\u8BA4",
+  "action.working": "\u6B63\u5728\u6267\u884C\u2026",
+  "action.pulling": "\u6B63\u5728\u62C9\u53D6\u2026",
+  "action.pulled": "\u5DF2\u62C9\u53D6",
+  "action.syncing": "\u6B63\u5728\u540C\u6B65\u2026",
+  "action.synced": "\u5DF2\u540C\u6B65",
+  "action.committed": "\u5DF2\u63D0\u4EA4 \xB7 {project}",
   "commit.open": "\u63D0\u4EA4",
   "commit.submit": "\u63D0\u4EA4",
   "commit.generateShort": "\u751F\u6210",
@@ -92,6 +102,8 @@ var zh = {
   "push.nothingAhead": "{target} \u6CA1\u6709\u672C\u5730\u9886\u5148\u7684\u63D0\u4EA4",
   "push.unknown": "\u5C06\u63A8\u9001\u5230 {target}",
   "push.unknownBody": "\u8FD9\u4E2A\u63D0\u4EA4\u5217\u8868\u9700\u8981\u91CD\u542F\u4E00\u6B21\u5BBF\u4E3B\u624D\u4F1A\u51FA\u73B0\uFF1B\u5728\u6B64\u4E4B\u524D\u8BF7\u5148\u786E\u8BA4\u8981\u63A8\u9001\u7684\u5185\u5BB9\u3002",
+  "push.working": "\u6B63\u5728\u63A8\u9001\u5230 {target}\u2026",
+  "push.done": "\u5DF2\u63A8\u9001\u5230 {target}",
   "push.list": "\u5C06\u8981\u63A8\u9001\u7684\u63D0\u4EA4",
   "commit.generate": "\u7528\u6A21\u578B\u751F\u6210\u63D0\u4EA4\u4FE1\u606F",
   "commit.generating": "\u6B63\u5728\u751F\u6210\u2026",
@@ -180,9 +192,9 @@ var en = {
   "projects.reading": "Reading\u2026",
   "projects.quietCount": "{count} clean projects",
   "projects.detached": "Detached HEAD",
-  "projects.stagedCount": "{count} ready",
+  "projects.stagedCount": "{count} staged",
   "projects.unstagedCount": "{count} unstaged",
-  "projects.untrackedCount": "0 staged \xB7 {count} untracked",
+  "projects.untrackedCount": "{count} untracked",
   "group.conflicts": "Conflicts",
   "group.staged": "Staged Changes",
   "group.unstaged": "Changes",
@@ -220,6 +232,12 @@ var en = {
   "action.cancel": "Cancel",
   "action.close": "Close",
   "action.confirm": "Confirm",
+  "action.working": "Working\u2026",
+  "action.pulling": "Pulling\u2026",
+  "action.pulled": "Pulled",
+  "action.syncing": "Syncing\u2026",
+  "action.synced": "Synced",
+  "action.committed": "Committed in {project}",
   "commit.open": "Commit",
   "commit.submit": "Commit",
   "commit.generateShort": "Generate",
@@ -233,6 +251,8 @@ var en = {
   "push.nothingAhead": "{target} has no commits the local branch is ahead by",
   "push.unknown": "Push to {target}",
   "push.unknownBody": "This commit list needs one host restart to appear; check what you are pushing until then.",
+  "push.working": "Pushing to {target}\u2026",
+  "push.done": "Pushed to {target}",
   "push.list": "Commits about to be pushed",
   "commit.generate": "Write the message with the configured model",
   "commit.generating": "Writing\u2026",
@@ -507,23 +527,40 @@ function ProjectLayer({ projects, summaries, current, onSelect }) {
 // src/actions.jsx
 var import_jsx_runtime2 = require("react/jsx-runtime");
 var GENERATE_TIMEOUT_MS = 6e4;
+var WORKING_AFTER_MS = 400;
+var DONE_FOR_MS = 6e3;
 function useActions(sessionId, refresh, repo) {
   const [busy, setBusy] = (0, import_react2.useState)(false);
   const [generating, setGenerating] = (0, import_react2.useState)(false);
   const [problem, setProblem] = (0, import_react2.useState)(void 0);
+  const [working, setWorking] = (0, import_react2.useState)(void 0);
+  const [done, setDone] = (0, import_react2.useState)(void 0);
   const [gate, setGate] = (0, import_react2.useState)(void 0);
+  (0, import_react2.useEffect)(() => {
+    if (done === void 0) return void 0;
+    const timer = setTimeout(() => setDone(void 0), DONE_FOR_MS);
+    return () => clearTimeout(timer);
+  }, [done]);
   const run = (0, import_react2.useCallback)(
-    async (body) => {
+    async (body, describe = {}) => {
       setBusy(true);
       setProblem(void 0);
+      setDone(void 0);
+      setWorking(void 0);
+      const slow = setTimeout(() => setWorking(describe.working ?? t("action.working")), WORKING_AFTER_MS);
       try {
         const answer = await postAction(sessionId, body, repo);
         await refresh();
+        if (describe.done !== void 0) {
+          setDone(typeof describe.done === "function" ? describe.done(answer) : describe.done);
+        }
         return answer;
       } catch (error) {
         setProblem(error.message);
         return void 0;
       } finally {
+        clearTimeout(slow);
+        setWorking(void 0);
         setBusy(false);
       }
     },
@@ -560,6 +597,8 @@ function useActions(sessionId, refresh, repo) {
     busy,
     generating,
     problem,
+    working,
+    done,
     dismiss: () => setGate(void 0)
   };
 }
@@ -591,7 +630,7 @@ function RiskGate({ gate, onDismiss, run }) {
     }
   );
 }
-function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, summaries, currentProject, onSelectProject }) {
+function CommitBar({ staged, busy, generating, problem, working, done, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, summaries, currentProject, onSelectProject }) {
   const [drafts, setDrafts] = (0, import_react2.useState)(() => /* @__PURE__ */ new Map());
   const key = currentProject ?? "";
   const message = drafts.get(key) ?? "";
@@ -607,7 +646,10 @@ function CommitBar({ staged, busy, generating, problem, run, generateMessage, co
   const submit = () => {
     if (!committable) return;
     setMessage("");
-    run({ action: "commit", message: message.trim() });
+    run(
+      { action: "commit", message: message.trim() },
+      { done: t("action.committed", { project: projectName ?? "" }) }
+    );
   };
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ProjectLayer, { projects, summaries, current: currentProject, onSelect: onSelectProject }),
@@ -701,7 +743,12 @@ function CommitBar({ staged, busy, generating, problem, run, generateMessage, co
         )
       ] }),
       staged.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-hint", children: t("commit.nothingStagedHint") }) : null,
-      generating ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-note", role: "status", children: t("commit.generating") }) : problem === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-note error", role: "alert", children: problem })
+      generating || working !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-note", role: "status", children: generating ? t("commit.generating") : working }) : problem !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-note error", role: "alert", children: problem }) : done !== void 0 ? (
+        // A push leaves nothing behind in the panel: the commits are gone from
+        // the branch and the ahead count drops to zero, which looks exactly like
+        // never having pushed. So the one action with no other evidence says so.
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-commit-note done", role: "status", children: done })
+      ) : null
     ] })
   ] });
 }
@@ -1402,7 +1449,10 @@ function RemoteActions({ repo, run, busy }) {
         disabled: busy || noRemote || noUpstream,
         title: noRemote ? t("remote.noRemote") : noUpstream ? t("remote.noUpstream") : t("repo.pull"),
         "aria-label": t("repo.pull"),
-        onClick: () => run({ action: "pull" }),
+        onClick: () => run(
+          { action: "pull" },
+          { working: t("action.pulling"), done: t("action.pulled") }
+        ),
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: "\u2193" }),
           " ",
@@ -1418,7 +1468,10 @@ function RemoteActions({ repo, run, busy }) {
         disabled: busy || noRemote || noUpstream,
         title: noRemote ? t("remote.noRemote") : noUpstream ? t("remote.noUpstream") : t("repo.sync"),
         "aria-label": t("repo.sync"),
-        onClick: () => run({ action: "sync" }),
+        onClick: () => run(
+          { action: "sync" },
+          { working: t("action.syncing"), done: t("action.synced") }
+        ),
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: "\u21C5" }),
           " ",
@@ -2076,6 +2129,10 @@ var CSS = `
 .gv-commit-hint{font-size:11px;color:var(--dsw-alias-label-secondary);padding:0 2px}
 .gv-commit-note{font-size:12px;color:var(--dsw-alias-label-secondary);padding:0 2px}
 .gv-commit-note.error{color:var(--dsw-alias-state-error-primary);white-space:pre-wrap;word-break:break-word}
+/* A finished action, where nothing else in the panel would show that it
+   happened at all. Success-toned rather than neutral, because the line it
+   replaces is the one that reports refusals. */
+.gv-commit-note.done{color:var(--dsw-alias-state-success-primary)}
 .gv-hover{position:fixed;z-index:60;pointer-events:none;background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.28);overflow:hidden;font-size:12px}
 .gv-hover-head{display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--gv-sunken);border-bottom:1px solid var(--dsw-alias-border-l1)}
 .gv-hover-path{flex:1;min-width:0;font-weight:600;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2686,7 +2743,7 @@ function GitView({ sessionId, useSessionStatus }) {
     setReload((value) => value + 1);
   }, []);
   const actions = useActions(sessionId, reloadStatus, projectPath);
-  const { run, confirm, gate, dismiss, busy, generating, generateMessage, problem } = actions;
+  const { run, confirm, gate, dismiss, busy, generating, generateMessage, problem, working, done } = actions;
   const move = (0, import_react7.useCallback)(
     (step) => {
       if (status?.available !== true) return;
@@ -2727,6 +2784,8 @@ function GitView({ sessionId, useSessionStatus }) {
             busy,
             generating,
             problem,
+            working,
+            done,
             run,
             generateMessage,
             confirmGenerate,
@@ -2830,8 +2889,15 @@ function GitView({ sessionId, useSessionStatus }) {
         gate: pushGate,
         onClose: () => setPushGate(void 0),
         onConfirm: () => {
+          const target = pushGate?.repo?.upstream ?? "origin";
           setPushGate(void 0);
-          run({ action: "push" });
+          run(
+            { action: "push" },
+            {
+              working: t("push.working", { target }),
+              done: t("push.done", { target })
+            }
+          );
         }
       }
     ),

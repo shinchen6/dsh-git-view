@@ -96,5 +96,40 @@ check('no English sentence is written directly into the markup', () => {
   if (leaked.length > 0) throw new Error(`untranslated markup: ${leaked.join(' | ')}`);
 });
 
+// A project row summarises one of the groups below it, and the two are read
+// together — the row says how much is waiting, the group says what kind. The
+// unstaged count once read 已暂存 ("staged"), which named the opposite group
+// from the one it counted, so the row and the section it stood for disagreed.
+check('each project count names its own group and not another one', () => {
+  const valueIn = (block, key) => {
+    const match = new RegExp(`^\\s*'${key.replace('.', '\\.')}':\\s*'([^']*)'`, 'm').exec(block);
+    if (match === null) throw new Error(`no value for ${key} — has the shape changed?`);
+    return match[1];
+  };
+  // `unstaged` contains `staged` as a substring, so the English side is matched
+  // on word boundaries rather than by substring.
+  const cases = [
+    ['projects.stagedCount', '已暂存', /\bstaged\b/],
+    ['projects.unstagedCount', '未暂存', /\bunstaged\b/],
+    ['projects.untrackedCount', '未跟踪', /\buntracked\b/],
+  ];
+  for (const [key, chinese, english] of cases) {
+    const zhValue = valueIn(zhBlock, key);
+    const enValue = valueIn(enBlock, key);
+    if (!zhValue.includes(chinese)) throw new Error(`${key} (zh) does not say "${chinese}": ${zhValue}`);
+    if (!english.test(enValue)) throw new Error(`${key} (en) does not name its own group: ${enValue}`);
+    // No count may carry another group's word: 未暂存 and 已暂存 share 暂存 but
+    // each contains only its own full marker, so a full-marker test is exact.
+    for (const [otherKey, otherChinese] of cases) {
+      if (otherKey !== key && zhValue.includes(otherChinese)) {
+        throw new Error(`${key} (zh) also claims ${otherKey}'s "${otherChinese}": ${zhValue}`);
+      }
+    }
+  }
+  // And the three must not be the same string wearing three keys.
+  const distinct = new Set(cases.map(([key]) => valueIn(zhBlock, key)));
+  if (distinct.size !== cases.length) throw new Error(`the three counts are not distinct: ${[...distinct].join(' / ')}`);
+});
+
 process.stdout.write(failures === 0 ? '\nall copy checks passed\n' : `\n${failures} copy check(s) failed\n`);
 process.exit(failures === 0 ? 0 : 1);

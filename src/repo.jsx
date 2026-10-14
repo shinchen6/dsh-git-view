@@ -93,7 +93,12 @@ export function RemoteActions({ repo, run, busy }) {
         disabled={busy || noRemote || noUpstream}
         title={noRemote ? t('remote.noRemote') : noUpstream ? t('remote.noUpstream') : t('repo.pull')}
         aria-label={t('repo.pull')}
-        onClick={() => run({ action: 'pull' })}
+        onClick={() =>
+          run(
+            { action: 'pull' },
+            { working: t('action.pulling'), done: t('action.pulled') },
+          )
+        }
       >
         <span aria-hidden="true">↓</span> {t('repo.pull')}
       </button>
@@ -103,7 +108,12 @@ export function RemoteActions({ repo, run, busy }) {
         disabled={busy || noRemote || noUpstream}
         title={noRemote ? t('remote.noRemote') : noUpstream ? t('remote.noUpstream') : t('repo.sync')}
         aria-label={t('repo.sync')}
-        onClick={() => run({ action: 'sync' })}
+        onClick={() =>
+          run(
+            { action: 'sync' },
+            { working: t('action.syncing'), done: t('action.synced') },
+          )
+        }
       >
         <span aria-hidden="true">⇅</span> {t('repo.sync')}
       </button>

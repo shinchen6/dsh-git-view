@@ -1,5 +1,5 @@
 import { Menu, Modal, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { postAction } from './api.js';
 import { t } from './i18n.js';
@@ -7,6 +7,19 @@ import { ProjectLayer } from './projects.jsx';
 
 /** How long one model call may take before the view reports it as stuck. */
 const GENERATE_TIMEOUT_MS = 60_000;
+
+/**
+ * How long an action must run before the panel says it is running.
+ *
+ * Staging one file takes a few milliseconds, and a line that appears and
+ * vanishes within one frame is a flicker rather than a message. Anything still
+ * going after this long is worth naming, because the alternative on a slow
+ * remote is a button that looks like it did nothing.
+ */
+const WORKING_AFTER_MS = 400;
+
+/** How long a finished action's result stays on screen before it clears itself. */
+const DONE_FOR_MS = 6_000;
 
 /**
  * Run repository actions and surface the ones that need a deliberate yes.
@@ -17,23 +30,55 @@ const GENERATE_TIMEOUT_MS = 60_000;
  * @param {() => Promise<void>} refresh - re-read the status after a change.
  * @returns {object} the action runner, its busy flags, its last refusal, and the gate.
  */
-export function useActions(sessionId, refresh, repo) {  const [busy, setBusy] = useState(false);
+export function useActions(sessionId, refresh, repo) {
+  const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [problem, setProblem] = useState(undefined);
+  const [working, setWorking] = useState(undefined);
+  const [done, setDone] = useState(undefined);
   const [gate, setGate] = useState(undefined);
 
+  // A result from an action that has already been replaced is stale, so it
+  // clears itself rather than sitting there claiming to be the last thing that
+  // happened.
+  useEffect(() => {
+    if (done === undefined) return undefined;
+    const timer = setTimeout(() => setDone(undefined), DONE_FOR_MS);
+    return () => clearTimeout(timer);
+  }, [done]);
+
+  /**
+   * Run one action.
+   *
+   * `describe` names what is happening while it happens and what happened
+   * afterwards. Staging a file needs neither — it is visible in the tree the
+   * moment it lands — but a push produces no trace in the panel at all, so
+   * without a line here it is indistinguishable from a button that did nothing.
+   *
+   * @param {object} body - the action to run.
+   * @param {{ working?: string, done?: string | ((answer: object) => string) }} [describe] - the labels.
+   * @returns {Promise<object | undefined>} the answer, or undefined on refusal.
+   */
   const run = useCallback(
-    async body => {
+    async (body, describe = {}) => {
       setBusy(true);
       setProblem(undefined);
+      setDone(undefined);
+      setWorking(undefined);
+      const slow = setTimeout(() => setWorking(describe.working ?? t('action.working')), WORKING_AFTER_MS);
       try {
         const answer = await postAction(sessionId, body, repo);
         await refresh();
+        if (describe.done !== undefined) {
+          setDone(typeof describe.done === 'function' ? describe.done(answer) : describe.done);
+        }
         return answer;
       } catch (error) {
         setProblem(error.message);
         return undefined;
       } finally {
+        clearTimeout(slow);
+        setWorking(undefined);
         setBusy(false);
       }
     },
@@ -86,6 +131,8 @@ export function useActions(sessionId, refresh, repo) {  const [busy, setBusy] = 
     busy,
     generating,
     problem,
+    working,
+    done,
     dismiss: () => setGate(undefined),
   };
 }
@@ -135,7 +182,7 @@ export function RiskGate({ gate, onDismiss, run }) {
  * @param {object} props - the staged set and the action runner.
  * @returns {React.ReactElement} the bar.
  */
-export function CommitBar({ staged, busy, generating, problem, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, summaries, currentProject, onSelectProject }) {
+export function CommitBar({ staged, busy, generating, problem, working, done, run, generateMessage, confirmGenerate, confirmPush, repo, projectName, projects, summaries, currentProject, onSelectProject }) {
   // One draft per project, not one draft for the view: a message half-written
   // for one repository must not be sitting in the box when another is current.
   const [drafts, setDrafts] = useState(() => new Map());
@@ -156,7 +203,10 @@ export function CommitBar({ staged, busy, generating, problem, run, generateMess
   const submit = () => {
     if (!committable) return;
     setMessage('');
-    run({ action: 'commit', message: message.trim() });
+    run(
+      { action: 'commit', message: message.trim() },
+      { done: t('action.committed', { project: projectName ?? '' }) },
+    );
   };
 
   return (
@@ -248,15 +298,22 @@ export function CommitBar({ staged, busy, generating, problem, run, generateMess
       ) : null}
       {/* The result of the last thing that ran, next to the control that ran it:
           a banner above the panel scrolls away and is never seen. */}
-      {generating ? (
+      {generating || working !== undefined ? (
         <span className="gv-commit-note" role="status">
-          {t('commit.generating')}
+          {generating ? t('commit.generating') : working}
         </span>
-      ) : problem === undefined ? null : (
+      ) : problem !== undefined ? (
         <span className="gv-commit-note error" role="alert">
           {problem}
         </span>
-      )}
+      ) : done !== undefined ? (
+        // A push leaves nothing behind in the panel: the commits are gone from
+        // the branch and the ahead count drops to zero, which looks exactly like
+        // never having pushed. So the one action with no other evidence says so.
+        <span className="gv-commit-note done" role="status">
+          {done}
+        </span>
+      ) : null}
       </div>
     </>
   );

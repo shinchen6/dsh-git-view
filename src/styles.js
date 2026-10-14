@@ -80,6 +80,10 @@ export const CSS = `
 .gv-commit-hint{font-size:11px;color:var(--dsw-alias-label-secondary);padding:0 2px}
 .gv-commit-note{font-size:12px;color:var(--dsw-alias-label-secondary);padding:0 2px}
 .gv-commit-note.error{color:var(--dsw-alias-state-error-primary);white-space:pre-wrap;word-break:break-word}
+/* A finished action, where nothing else in the panel would show that it
+   happened at all. Success-toned rather than neutral, because the line it
+   replaces is the one that reports refusals. */
+.gv-commit-note.done{color:var(--dsw-alias-state-success-primary)}
 .gv-hover{position:fixed;z-index:60;pointer-events:none;background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.28);overflow:hidden;font-size:12px}
 .gv-hover-head{display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--gv-sunken);border-bottom:1px solid var(--dsw-alias-border-l1)}
 .gv-hover-path{flex:1;min-width:0;font-weight:600;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

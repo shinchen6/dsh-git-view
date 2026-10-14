@@ -672,7 +672,7 @@ export function GitView({ sessionId, useSessionStatus }) {
   }, []);
 
   const actions = useActions(sessionId, reloadStatus, projectPath);
-  const { run, confirm, gate, dismiss, busy, generating, generateMessage, problem } = actions;
+  const { run, confirm, gate, dismiss, busy, generating, generateMessage, problem, working, done } = actions;
 
   /**
    * Walk the visible rows with the arrow keys, the way a file list should.
@@ -726,6 +726,8 @@ export function GitView({ sessionId, useSessionStatus }) {
                 busy={busy}
                 generating={generating}
                 problem={problem}
+                working={working}
+                done={done}
                 run={run}
                 generateMessage={generateMessage}
                 confirmGenerate={confirmGenerate}
@@ -829,8 +831,17 @@ export function GitView({ sessionId, useSessionStatus }) {
         gate={pushGate}
         onClose={() => setPushGate(undefined)}
         onConfirm={() => {
+          // Named the same way the gate above named it, so the line that
+          // confirms the push points at the remote the confirmation did.
+          const target = pushGate?.repo?.upstream ?? 'origin';
           setPushGate(undefined);
-          run({ action: 'push' });
+          run(
+            { action: 'push' },
+            {
+              working: t('push.working', { target }),
+              done: t('push.done', { target }),
+            },
+          );
         }}
       />
       <RiskConfirmation
