@@ -12,6 +12,10 @@ Harness conversation view.
 A **Git** tab in the conversation view ring, after Trajectory. It reads the
 repository the session is working in — no path to configure, no second UI.
 
+- **Every project in the workspace** — the repositories around the working
+  directory, each with its own branch, markers and commit. They are committed
+  separately, never across repositories. Projects with nothing pending fold into
+  one row so the ones you are actually working on stay on screen.
 - **Change groups** — conflicts, staged, unstaged and untracked, each with
   folder rows that fold a whole subtree and stage or discard it in one action.
 - **Three ways to read a file** — whole file with the changes marked, changes
@@ -28,6 +32,10 @@ repository the session is working in — no path to configure, no second UI.
 Untracked directories stay folded until opened, and opening one asks git about
 that directory alone. A working tree with twenty thousand untracked files costs
 the same to list as one with twenty.
+
+A repository nested inside another one is not offered as a folder in its
+parent's file list, because git will not describe what is inside it to the
+parent and opening one would show nothing. It is one of the projects instead.
 
 ## Install
 
