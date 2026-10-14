@@ -1000,6 +1000,50 @@ await check('a staged picture previews like any other', async () => {
       }
     });
 
+    await check('an untracked directory that is a repository is not listed', async () => {
+      // git describes one of these to its parent as a single entry with a
+      // trailing slash and refuses to say what is inside, so offering it would
+      // offer a folder that expands to nothing. Editors reach the same
+      // conclusion and drop it; it is reached as a project instead.
+      const { body } = await call('/api/git.status', { sessionId: 's', repo: resolvePath(repo) });
+      const row = body.untracked.find(file => file.path === 'app-near/');
+      assert.equal(row, undefined, 'the nested repository is not offered as a folder');
+      assert.equal(
+        body.counts.untracked.total,
+        body.untracked.length,
+        'and it is not left in the count beside the entries that are shown',
+      );
+      assert.ok(
+        body.projects === undefined,
+        'the status route says nothing about projects; that is the other route',
+      );
+    });
+
+    await check('a plain untracked directory is still listed and still opens', async () => {
+      // The check above throws the nested repositories away, and it must not
+      // throw the ordinary folders out with them: they are real directories
+      // whose contents the panel does know how to fetch.
+      const plain = join(repo, 'plain-dir');
+      mkdirSync(plain, { recursive: true });
+      writeFileSync(join(plain, 'a.txt'), 'a\n');
+      writeFileSync(join(plain, 'b.txt'), 'b\n');
+      try {
+        const { body } = await call('/api/git.status', { sessionId: 's', repo: resolvePath(repo) });
+        const row = body.untracked.find(file => file.path === 'plain-dir/');
+        assert.ok(row, 'the plain directory is listed');
+        assert.equal(row.dir, true, 'as a folder that can be opened');
+
+        const opened = await call('/api/git.untracked', {
+          sessionId: 's',
+          repo: resolvePath(repo),
+          dir: 'plain-dir/',
+        });
+        assert.deepEqual(opened.body.files.map(file => file.path).sort(), ['plain-dir/a.txt', 'plain-dir/b.txt']);
+      } finally {
+        rmSync(plain, { recursive: true, force: true });
+      }
+    });
+
     await check('the session\'s own repository is one of the projects', async () => {
       // The directory the session is sitting in is the project the person is
       // working on, and it is listed like any other rather than being implied.

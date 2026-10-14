@@ -746,7 +746,7 @@ async function readWorktreeBytes(ctx, root, path, signal) {
 }
 
 /** The file groups the view renders, with their shared row shape. */
-function groupFiles(entries, stagedCounts, unstagedCounts) {
+function groupFiles(entries, stagedCounts, unstagedCounts, nested = new Set()) {
   const conflicts = [];
   const staged = [];
   const unstaged = [];
@@ -758,6 +758,10 @@ function groupFiles(entries, stagedCounts, unstagedCounts) {
       // Porcelain writes an untracked directory with a trailing slash and omits its
       // contents; marking it lets the tree offer to open it.
       const dir = entry.path.endsWith('/');
+      // One of those directories is a repository in its own right, and there is
+      // nothing to open inside it. Offering to would be a row that expands to
+      // itself and then to nothing, so it is not offered at all.
+      if (dir && nested.has(entry.path)) continue;
       untracked.push({
         path: entry.path,
         display: entry.path,
@@ -802,8 +806,48 @@ function groupFiles(entries, stagedCounts, unstagedCounts) {
     untracked: limit('untracked'),
     counts,
     truncated,
-    total: entries.length,
+    total: entries.length - nested.size,
   };
+}
+
+/**
+ * The untracked entries that are repositories in their own right.
+ *
+ * The parent cannot describe what is inside one of these: git reports the
+ * directory as a single entry with a trailing slash and stops. Editors reach
+ * the same conclusion — VSCode's Git parser discards any trailing-slash record
+ * for exactly this reason (`extensions/git/src/git.ts`, `GitStatusParser`) — and
+ * offer a nested repository as its own project instead of as a folder here.
+ *
+ * The check has to be made rather than assumed. This scan stops descending at
+ * each untracked directory (`--untracked-files=normal`) so that opening one
+ * costs only the person who opens it, and that means a trailing slash marks any
+ * untracked directory, not only the ones with a `.git` in them.
+ *
+ * @param {object} ctx - the plugin context.
+ * @param {string} root - the repository being described.
+ * @param {object[]} entries - the parsed status entries.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<Set<string>>} the paths, as status entries spell them.
+ */
+async function nestedRepositoryPaths(ctx, root, entries, signal) {
+  const dirs = entries.filter(entry => entry.status === '?' && entry.path.endsWith('/'));
+  if (dirs.length === 0) return new Set();
+  const found = await Promise.all(
+    dirs.map(async entry => {
+      try {
+        // lstat does not follow the final component, so a `.git` symlink is
+        // found without being read through.
+        const dotGit = await ctx.fs.lstat(join(root, entry.path, '.git'), {}, signal);
+        return dotGit === undefined ? null : entry.path;
+      } catch {
+        // A directory that cannot be inspected is not evidence of a repository,
+        // so it stays an ordinary folder.
+        return null;
+      }
+    }),
+  );
+  return new Set(found.filter(path => path !== null));
 }
 
 /**
@@ -844,6 +888,7 @@ async function handleStatus(ctx, git, request) {
   const hasRemote = remotes.exitCode === 0 && remotes.stdout.trim() !== '';
   const stagedCounts = parseNumstat((await git.run(['diff', '--numstat', '-z', '--cached'], { cwd: root })).stdout);
   const unstagedCounts = parseNumstat((await git.run(['diff', '--numstat', '-z'], { cwd: root })).stdout);
+  const grouped = groupFiles(entries, stagedCounts, unstagedCounts, await nestedRepositoryPaths(ctx, root, entries, request.signal));
 
   return json({
     available: true,
@@ -864,7 +909,7 @@ async function handleStatus(ctx, git, request) {
       // to leave the machine.
       ...(await outgoingCommits(git, root, branch, request.signal)),
     },
-    ...groupFiles(entries, stagedCounts, unstagedCounts),
+    ...grouped,
     clean: entries.length === 0,
   });
 }

@@ -150,6 +150,7 @@ function FileRow({ file, side, depth, selected, onSelect, actions, hover, checke
 function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, actions, hover, checked, onCheck, expand }) {
   const key = `${side}:${dir.path}`;
   const open = !collapsed.has(key);
+
   // A directory the status scan reported without its contents: known to exist
   // and nothing else, so opening it has to go and ask.
   const wantsContents = dir.all.some(file => file.dir === true);
