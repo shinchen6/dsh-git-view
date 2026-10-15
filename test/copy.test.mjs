@@ -96,6 +96,25 @@ check('no English sentence is written directly into the markup', () => {
   if (leaked.length > 0) throw new Error(`untranslated markup: ${leaked.join(' | ')}`);
 });
 
+// The stylesheet is one template literal, so a backtick inside it — in a
+// comment, which reads as harmless — ends the string and turns the rest of the
+// CSS into JavaScript. It failed twice before this check existed, both times
+// from a comment.
+check('no backtick appears inside the stylesheet literal', () => {
+  const styles = readFileSync(join(srcDir, 'styles.js'), 'utf8');
+  const open = styles.indexOf('`');
+  const close = styles.lastIndexOf('`');
+  if (open < 0 || close <= open) throw new Error('styles.js no longer wraps its CSS in one literal');
+  const inner = styles.slice(open + 1, close);
+  const at = inner.indexOf('`');
+  if (at >= 0) {
+    const line = inner.slice(0, at).split('\n').length + styles.slice(0, open).split('\n').length;
+    throw new Error(`a backtick closes the literal at styles.js:${line} — ${inner.slice(Math.max(0, at - 40), at + 20).trim()}`);
+  }
+  // And the rule the comment above is about must still be there.
+  if (!inner.includes('.gv-grip')) throw new Error('the grip rule is missing from the stylesheet');
+});
+
 // A project row summarises one of the groups below it, and the two are read
 // together — the row says how much is waiting, the group says what kind. The
 // unstaged count once read 已暂存 ("staged"), which named the opposite group

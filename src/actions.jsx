@@ -236,17 +236,24 @@ export function CommitBar({ staged, busy, generating, problem, working, done, ru
         />
         {/* The field is pinned to the bottom of the window, so the grip sits at its top
             right; the native grip cannot be moved, so it is turned off and this
-            replaces it. */}
+            replaces it.
+
+            The chevron is drawn rather than typed. `⌃` is U+2303, from the
+            Miscellaneous Technical block, and the font here renders it as a
+            seven-by-seventeen-pixel hairline that sits above the text it sits
+            beside — an arrow with the wrong proportions and the wrong optical
+            baseline. A rotated border draws the same shape VSCode's codicon
+            does and cannot drift with the font. */}
         <button
           type="button"
-          className="gv-btn icon gv-commit-expand"
+          className={`gv-btn icon gv-commit-expand${wide ? ' is-open' : ''}`}
           title={wide ? t('commit.collapse') : t('commit.expand')}
           aria-label={wide ? t('commit.collapse') : t('commit.expand')}
           aria-expanded={wide}
           aria-controls="gv-commit-message"
           onClick={() => setWide(value => !value)}
         >
-          <span aria-hidden="true">{wide ? '⌄' : '⌃'}</span>
+          <span className="gv-grip" aria-hidden="true" />
         </button>
       </div>
       <div className="gv-commit-bar">

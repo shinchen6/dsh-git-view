@@ -677,13 +677,13 @@ function CommitBar({ staged, busy, generating, problem, working, done, run, gene
           "button",
           {
             type: "button",
-            className: "gv-btn icon gv-commit-expand",
+            className: `gv-btn icon gv-commit-expand${wide ? " is-open" : ""}`,
             title: wide ? t("commit.collapse") : t("commit.expand"),
             "aria-label": wide ? t("commit.collapse") : t("commit.expand"),
             "aria-expanded": wide,
             "aria-controls": "gv-commit-message",
             onClick: () => setWide((value) => !value),
-            children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { "aria-hidden": "true", children: wide ? "\u2304" : "\u2303" })
+            children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "gv-grip", "aria-hidden": "true" })
           }
         )
       ] }),
@@ -2112,6 +2112,16 @@ var CSS = `
    the later rule would stretch this across the field and eat clicks on the
    first line of text. */
 .gv-btn.icon.gv-commit-expand{position:absolute;top:4px;right:6px;width:24px;height:24px;padding:0;border-color:transparent;background:none;color:var(--dsw-alias-label-secondary)}
+/* Two borders on a square, turned into a chevron. U+2303 was a 7x17px hairline
+   in this font, which reads as a caret rather than an arrow; drawn, it is 7x7
+   and sits on the button's own centre line whatever the font does.
+
+   inline-block rather than inline, because width and height are ignored on an
+   inline box and the two borders collapse into a one-pixel line the height of
+   the text. Not block: a block box ignores the button's text-align and sits
+   against its left edge, seven pixels off centre. */
+.gv-grip{display:inline-block;box-sizing:border-box;width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-135deg);transform-origin:50% 50%;translate:0 -1px}
+.gv-commit-expand.is-open .gv-grip{transform:rotate(45deg);translate:0 1px}
 .gv-commit-expand:hover{border-color:var(--dsw-alias-border-l1);background:var(--gv-hover);color:var(--dsw-alias-label-primary)}
 /* Open: the field takes the panel's leftover height and the tree above it
    gives up the room. The panel grows upward, the direction the control says
