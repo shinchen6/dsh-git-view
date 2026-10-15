@@ -10,16 +10,17 @@ import { t } from './i18n.js';
 import { BranchMenu, RemoteActions, RepoBulkMenu, StashMenu } from './repo.jsx';
 import { markChanges } from './marks.js';
 import { FileTree, visibleOrder } from './tree.jsx';
+import { sideOf } from './treebuild.js';
 import { DiffSkeleton, FileSkeleton, LoadingAnnounce, TreeSkeleton, diffLoading, fileLoading, treeLoading } from './skeleton.jsx';
 import { CSS } from './styles.js';
 
 /** Groups that start folded out of the way. */
-const INITIALLY_COLLAPSED = new Set(['untracked']);
+const INITIALLY_COLLAPSED = new Set();
 
 /** Which file route side answers for one list side. */
-const FILE_SIDE = { staged: 'staged', unstaged: 'worktree', untracked: 'worktree' };
+const FILE_SIDE = { staged: 'staged', unstaged: 'worktree' };
 /** The status groups, in the order the tree renders them; also the side names. */
-const GROUPS = ['conflicts', 'staged', 'unstaged', 'untracked'];
+const GROUPS = ['conflicts', 'staged', 'unstaged'];
 
 /** Below this the tree cannot show a path, above it the diff cannot show a line. */
 const SPLIT_MIN = 0.22;
@@ -398,7 +399,7 @@ export function GitView({ sessionId, useSessionStatus }) {
     if (opened.size === 0 || status === undefined) return status;
     return {
       ...status,
-      untracked: status.untracked.flatMap(file => {
+      unstaged: status.unstaged.flatMap(file => {
         if (file.dir !== true) return [file];
         const answer = opened.get(file.path.replace(/\/+$/, ''));
         return answer?.files ?? [file];
@@ -413,8 +414,8 @@ export function GitView({ sessionId, useSessionStatus }) {
   // opening them, and a tree that opens everything on mount asks for all of it:
   // one request per untracked folder, the very scan this avoids.
   useEffect(() => {
-    const shut = (shown?.untracked ?? [])
-      .filter(file => file.dir === true)
+    const shut = (shown?.unstaged ?? [])
+      .filter(file => file.dir === true && file.status === '?')
       .map(file => file.path.replace(/\/+$/, ''))
       .filter(path => !opened.has(path));
     if (shut.length === 0) return;
@@ -459,14 +460,15 @@ export function GitView({ sessionId, useSessionStatus }) {
     });
   }, [status]);
   // Checked files carry their side so the bar can tell a staged path from an
-  // untracked one; `discard` is a different git command for each.
+  // untracked one; `discard` is a different git command for each. The group
+  // cannot answer that on its own now that both kinds share a list.
   const checkedFiles = useMemo(
     () =>
       GROUPS.flatMap(group => {
         const side = group === 'conflicts' ? 'unstaged' : group;
         return (status?.[group] ?? [])
           .filter(file => checked.has(file.path))
-          .map(file => ({ ...file, side }));
+          .map(file => ({ ...file, side: sideOf(file, side) }));
       }),
     [status, checked],
   );
@@ -687,7 +689,7 @@ export function GitView({ sessionId, useSessionStatus }) {
       const at = order.findIndex(entry => entry.path === selected?.path);
       const next = at < 0 ? (step > 0 ? 0 : order.length - 1) : Math.min(order.length - 1, Math.max(0, at + step));
       const target = order[next];
-      const file = [...status.conflicts, ...status.staged, ...status.unstaged, ...status.untracked].find(
+      const file = [...status.conflicts, ...status.staged, ...status.unstaged].find(
         candidate => candidate.path === target.path,
       );
       if (file !== undefined) setSelected({ ...file, side: target.side });

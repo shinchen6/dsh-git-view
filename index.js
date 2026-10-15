@@ -797,13 +797,20 @@ function groupFiles(entries, stagedCounts, unstagedCounts, nested = new Set()) {
     truncated = true;
     return lists[key].slice(0, MAX_FILES);
   };
-  const lists = { conflicts, staged, unstaged, untracked };
+  const lists = { conflicts, staged, unstaged };
+  // Untracked files join the working tree rather than a group of their own.
+  //
+  // VSCode's `git.untrackedChanges` defaults to `mixed`, which puts them in the
+  // Changes group and tells them apart by the `?` in front of the name; a group
+  // called `untracked` only exists under the `separate` setting. Each row keeps
+  // its `?`, which is also what tells the Host to `git clean` it rather than
+  // `git checkout` it — so nothing is lost by sharing the list.
+  lists.unstaged.push(...untracked);
 
   return {
     conflicts: limit('conflicts'),
     staged: limit('staged'),
     unstaged: limit('unstaged'),
-    untracked: limit('untracked'),
     counts,
     truncated,
     total: entries.length - nested.size,

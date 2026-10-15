@@ -519,11 +519,16 @@ export function SelectionBar({ files, run, confirm }) {
  * @param {object} props - the directory's side and its paths.
  * @returns {React.ReactElement | null} the strip, or nothing when it is empty.
  */
-export function DirActions({ side, paths, run, confirm }) {
+export function DirActions({ side, files, paths, run, confirm }) {
   if (paths.length === 0) return null;
   const staged = side === 'staged';
-  const untracked = side === 'untracked';
-  const discardSide = untracked ? 'untracked' : 'unstaged';
+  // A directory in the working tree group can hold either kind of file, so the
+  // group cannot say what discarding means for it. The rows can: `git clean`
+  // for the `?` ones, `git checkout` for the rest. If both are present the
+  // strip drops the destructive button rather than guessing.
+  const kinds = new Set((files ?? []).map(file => (file.status === '?' ? 'untracked' : 'unstaged')));
+  const untracked = staged || kinds.size !== 1 ? false : kinds.has('untracked');
+  const mixed = kinds.size > 1;
 
   return (
     <span className="gv-row-actions">
@@ -539,18 +544,18 @@ export function DirActions({ side, paths, run, confirm }) {
       >
         {staged ? '−' : '+'}
       </button>
-      {staged ? null : (
+      {staged || mixed ? null : (
         <button
           type="button"
           className="gv-quick"
-          title={t('group.discardAll')}
-          aria-label={t('group.discardAll')}
+          title={untracked ? t('risk.deleteAllTitle') : t('group.discardAll')}
+          aria-label={untracked ? t('risk.deleteAllTitle') : t('group.discardAll')}
           onClick={event => {
             event.stopPropagation();
             confirm(
               untracked ? t('risk.deleteAllTitle') : t('risk.discardAllTitle'),
               t(untracked ? 'risk.deleteAllBody' : 'risk.discardAllBody', { n: paths.length }),
-              { action: 'discard', side: discardSide, paths },
+              { action: 'discard', side: untracked ? 'untracked' : 'unstaged', paths },
             );
           }}
         >
@@ -567,6 +572,6 @@ export function DirActions({ side, paths, run, confirm }) {
  * @param {object} props - the group key, its side, and its paths.
  * @returns {React.ReactElement | null} the strip, or nothing when the group is empty.
  */
-export function GroupActions({ side, paths, run, confirm }) {
-  return <DirActions side={side} paths={paths} run={run} confirm={confirm} />;
+export function GroupActions({ side, files, paths, run, confirm }) {
+  return <DirActions side={side} files={files} paths={paths} run={run} confirm={confirm} />;
 }

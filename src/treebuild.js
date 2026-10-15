@@ -1,6 +1,23 @@
 /** Turning a flat status list into a folder tree. */
 
 /**
+ * Which side of the working tree a row is discarded from.
+ *
+ * Untracked files share the Changes group with the tracked ones, so the group
+ * cannot answer this — but the row's `?` can, and it has to: throwing away an
+ * edit is `git checkout`, while throwing away a file git never knew about is
+ * `git clean`, which deletes it. Reading the side off the group instead would
+ * offer to restore a file that was never there.
+ * @param {object} file - the status row.
+ * @param {string} side - the side its group belongs to.
+ * @returns {string} `untracked`, `staged`, or `unstaged`.
+ */
+export function sideOf(file, side) {
+  if (side === 'unstaged' && file.status === '?') return 'untracked';
+  return side;
+}
+
+/**
  * Build the directory tree for one side of the working tree.
  * Directories are real nodes, not a prefix drawn into a file name: a folder can
  * be folded away, and folding it has to take its whole subtree with it.

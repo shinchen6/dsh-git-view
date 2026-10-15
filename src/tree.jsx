@@ -1,7 +1,7 @@
 import { DirActions, GroupActions, RowActions } from './actions.jsx';
 import { useEffect } from 'react';
 
-import { buildTree } from './treebuild.js';
+import { buildTree, sideOf } from './treebuild.js';
 import { t } from './i18n.js';
 
 export { buildTree };
@@ -71,7 +71,7 @@ function sortNode(node) {
  * @returns {void} appends to `into`.
  */
 function collectVisible(node, collapsed, side, into) {
-  for (const file of node.files) into.push({ ...file, side });
+  for (const file of node.files) into.push({ ...file, side: sideOf(file, side) });
   for (const dir of node.dirs) {
     if (collapsed.has(`${side}:${dir.path}`)) continue;
     collectVisible(dir, collapsed, side, into);
@@ -89,7 +89,6 @@ export function visibleOrder(status, collapsed) {
     ['conflicts', 'unstaged', status.conflicts],
     ['staged', 'staged', status.staged],
     ['unstaged', 'unstaged', status.unstaged],
-    ['untracked', 'untracked', status.untracked],
   ];
   const order = [];
   for (const [key, side, files] of groups) {
@@ -187,6 +186,7 @@ function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, act
         </button>
         <DirActions
           side={side}
+          files={dir.all}
           paths={dir.all.map(file => file.path)}
           run={actions.run}
           confirm={actions.confirm}
@@ -285,6 +285,7 @@ function FileGroup({ title, files, side, selected, onSelect, open, onToggle, col
         </button>
         <GroupActions
           side={side}
+          files={files}
           paths={files.map(file => file.path)}
           run={actions.run}
           confirm={actions.confirm}
@@ -311,7 +312,11 @@ function FileGroup({ title, files, side, selected, onSelect, open, onToggle, col
 }
 
 /**
- * The file list: conflicts first, then staged, then unstaged, then untracked.
+ * The file list: conflicts first, then staged, then the working tree.
+ *
+ * Three groups, which is what VSCode shows with its default settings. Untracked
+ * files are in the working tree group rather than one of their own, told apart
+ * by the `?` on each row.
  * @returns {React.ReactElement} the tree.
  */
 export function FileTree({ status, selected, onSelect, collapsed, onToggle, onToggleDir, actions, hover, checked, onCheck, expand }) {
@@ -319,7 +324,6 @@ export function FileTree({ status, selected, onSelect, collapsed, onToggle, onTo
     { key: 'conflicts', side: 'unstaged', title: t('group.conflicts'), files: status.conflicts },
     { key: 'staged', side: 'staged', title: t('group.staged'), files: status.staged },
     { key: 'unstaged', side: 'unstaged', title: t('group.unstaged'), files: status.unstaged },
-    { key: 'untracked', side: 'untracked', title: t('group.untracked'), files: status.untracked },
   ];
   return (
     <div className="gv-tree" role="tree">

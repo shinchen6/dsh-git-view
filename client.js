@@ -49,7 +49,6 @@ var zh = {
   "group.conflicts": "\u51B2\u7A81",
   "group.staged": "\u6682\u5B58\u7684\u66F4\u6539",
   "group.unstaged": "\u66F4\u6539",
-  "group.untracked": "\u672A\u8DDF\u8E2A",
   "empty.clean": "\u5DE5\u4F5C\u533A\u6CA1\u6709\u53D8\u66F4",
   "empty.select": "\u4ECE\u5DE6\u4FA7\u9009\u62E9\u4E00\u4E2A\u6587\u4EF6\u67E5\u770B\u5DEE\u5F02",
   "empty.notRepository": "\u8FD9\u4E2A\u76EE\u5F55\u4E0D\u5728 Git \u4ED3\u5E93\u91CC",
@@ -198,7 +197,6 @@ var en = {
   "group.conflicts": "Conflicts",
   "group.staged": "Staged Changes",
   "group.unstaged": "Changes",
-  "group.untracked": "Untracked",
   "empty.clean": "No changes",
   "empty.select": "Select a file on the left to see its diff",
   "empty.notRepository": "This directory is not a Git repository",
@@ -897,11 +895,12 @@ function SelectionBar({ files, run, confirm }) {
     )
   ] });
 }
-function DirActions({ side, paths, run, confirm }) {
+function DirActions({ side, files, paths, run, confirm }) {
   if (paths.length === 0) return null;
   const staged = side === "staged";
-  const untracked = side === "untracked";
-  const discardSide = untracked ? "untracked" : "unstaged";
+  const kinds = new Set((files ?? []).map((file) => file.status === "?" ? "untracked" : "unstaged"));
+  const untracked = staged || kinds.size !== 1 ? false : kinds.has("untracked");
+  const mixed = kinds.size > 1;
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: "gv-row-actions", children: [
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "button",
@@ -917,19 +916,19 @@ function DirActions({ side, paths, run, confirm }) {
         children: staged ? "\u2212" : "+"
       }
     ),
-    staged ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    staged || mixed ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "button",
       {
         type: "button",
         className: "gv-quick",
-        title: t("group.discardAll"),
-        "aria-label": t("group.discardAll"),
+        title: untracked ? t("risk.deleteAllTitle") : t("group.discardAll"),
+        "aria-label": untracked ? t("risk.deleteAllTitle") : t("group.discardAll"),
         onClick: (event) => {
           event.stopPropagation();
           confirm(
             untracked ? t("risk.deleteAllTitle") : t("risk.discardAllTitle"),
             t(untracked ? "risk.deleteAllBody" : "risk.discardAllBody", { n: paths.length }),
-            { action: "discard", side: discardSide, paths }
+            { action: "discard", side: untracked ? "untracked" : "unstaged", paths }
           );
         },
         children: "\u2298"
@@ -937,8 +936,8 @@ function DirActions({ side, paths, run, confirm }) {
     )
   ] });
 }
-function GroupActions({ side, paths, run, confirm }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(DirActions, { side, paths, run, confirm });
+function GroupActions({ side, files, paths, run, confirm }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(DirActions, { side, files, paths, run, confirm });
 }
 
 // src/skeleton.jsx
@@ -1377,8 +1376,9 @@ var import_jsx_runtime7 = require("react/jsx-runtime");
 function RepoBulkMenu({ status, run, confirm, busy }) {
   const [open, setOpen] = (0, import_react5.useState)(false);
   const close = () => setOpen(false);
-  const unstaged = [...status.unstaged, ...status.conflicts];
-  const untracked = status.untracked;
+  const workingTree = [...status.unstaged, ...status.conflicts];
+  const untracked = workingTree.filter((file) => file.status === "?");
+  const unstaged = workingTree.filter((file) => file.status !== "?");
   const staged = status.staged;
   const count = (list, key) => t(key, { n: list.length });
   const items = [];
@@ -1737,6 +1737,10 @@ function markChanges(hunks) {
 var import_react6 = require("react");
 
 // src/treebuild.js
+function sideOf(file, side) {
+  if (side === "unstaged" && file.status === "?") return "untracked";
+  return side;
+}
 function buildTree(files) {
   const root = { name: "", path: "", dirs: [], files: [], all: [] };
   const index = /* @__PURE__ */ new Map([["", root]]);
@@ -1819,7 +1823,7 @@ function sortNode(node) {
   for (const dir of node.dirs) sortNode(dir);
 }
 function collectVisible(node, collapsed, side, into) {
-  for (const file of node.files) into.push({ ...file, side });
+  for (const file of node.files) into.push({ ...file, side: sideOf(file, side) });
   for (const dir of node.dirs) {
     if (collapsed.has(`${side}:${dir.path}`)) continue;
     collectVisible(dir, collapsed, side, into);
@@ -1829,8 +1833,7 @@ function visibleOrder(status, collapsed) {
   const groups = [
     ["conflicts", "unstaged", status.conflicts],
     ["staged", "staged", status.staged],
-    ["unstaged", "unstaged", status.unstaged],
-    ["untracked", "untracked", status.untracked]
+    ["unstaged", "unstaged", status.unstaged]
   ];
   const order = [];
   for (const [key, side, files] of groups) {
@@ -1912,6 +1915,7 @@ function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, act
         DirActions,
         {
           side,
+          files: dir.all,
           paths: dir.all.map((file) => file.path),
           run: actions.run,
           confirm: actions.confirm
@@ -1996,6 +2000,7 @@ function FileGroup({ title, files, side, selected, onSelect, open, onToggle, col
         GroupActions,
         {
           side,
+          files,
           paths: files.map((file) => file.path),
           run: actions.run,
           confirm: actions.confirm
@@ -2025,8 +2030,7 @@ function FileTree({ status, selected, onSelect, collapsed, onToggle, onToggleDir
   const groups = [
     { key: "conflicts", side: "unstaged", title: t("group.conflicts"), files: status.conflicts },
     { key: "staged", side: "staged", title: t("group.staged"), files: status.staged },
-    { key: "unstaged", side: "unstaged", title: t("group.unstaged"), files: status.unstaged },
-    { key: "untracked", side: "untracked", title: t("group.untracked"), files: status.untracked }
+    { key: "unstaged", side: "unstaged", title: t("group.unstaged"), files: status.unstaged }
   ];
   return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "gv-tree", role: "tree", children: groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
     FileGroup,
@@ -2310,9 +2314,9 @@ var CSS = `
 
 // src/view.jsx
 var import_jsx_runtime9 = require("react/jsx-runtime");
-var INITIALLY_COLLAPSED = /* @__PURE__ */ new Set(["untracked"]);
-var FILE_SIDE = { staged: "staged", unstaged: "worktree", untracked: "worktree" };
-var GROUPS = ["conflicts", "staged", "unstaged", "untracked"];
+var INITIALLY_COLLAPSED = /* @__PURE__ */ new Set();
+var FILE_SIDE = { staged: "staged", unstaged: "worktree" };
+var GROUPS = ["conflicts", "staged", "unstaged"];
 var SPLIT_MIN = 0.22;
 var SPLIT_MAX = 0.62;
 var SPLIT_KEY = "dsh-git-view:split";
@@ -2571,7 +2575,7 @@ function GitView({ sessionId, useSessionStatus }) {
     if (opened.size === 0 || status === void 0) return status;
     return {
       ...status,
-      untracked: status.untracked.flatMap((file2) => {
+      unstaged: status.unstaged.flatMap((file2) => {
         if (file2.dir !== true) return [file2];
         const answer = opened.get(file2.path.replace(/\/+$/, ""));
         return answer?.files ?? [file2];
@@ -2579,7 +2583,7 @@ function GitView({ sessionId, useSessionStatus }) {
     };
   }, [status, opened]);
   (0, import_react7.useEffect)(() => {
-    const shut = (shown?.untracked ?? []).filter((file2) => file2.dir === true).map((file2) => file2.path.replace(/\/+$/, "")).filter((path) => !opened.has(path));
+    const shut = (shown?.unstaged ?? []).filter((file2) => file2.dir === true && file2.status === "?").map((file2) => file2.path.replace(/\/+$/, "")).filter((path) => !opened.has(path));
     if (shut.length === 0) return;
     setCollapsed((current) => {
       const next = new Set(current);
@@ -2616,7 +2620,7 @@ function GitView({ sessionId, useSessionStatus }) {
   const checkedFiles = (0, import_react7.useMemo)(
     () => GROUPS.flatMap((group) => {
       const side = group === "conflicts" ? "unstaged" : group;
-      return (status?.[group] ?? []).filter((file2) => checked.has(file2.path)).map((file2) => ({ ...file2, side }));
+      return (status?.[group] ?? []).filter((file2) => checked.has(file2.path)).map((file2) => ({ ...file2, side: sideOf(file2, side) }));
     }),
     [status, checked]
   );
@@ -2752,7 +2756,7 @@ function GitView({ sessionId, useSessionStatus }) {
       const at = order.findIndex((entry) => entry.path === selected?.path);
       const next = at < 0 ? step > 0 ? 0 : order.length - 1 : Math.min(order.length - 1, Math.max(0, at + step));
       const target = order[next];
-      const file2 = [...status.conflicts, ...status.staged, ...status.unstaged, ...status.untracked].find(
+      const file2 = [...status.conflicts, ...status.staged, ...status.unstaged].find(
         (candidate) => candidate.path === target.path
       );
       if (file2 !== void 0) setSelected({ ...file2, side: target.side });

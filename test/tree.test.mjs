@@ -1,7 +1,7 @@
 // The tree is the one part of the panel whose failures are silent: a row that
 // does not appear looks like a repository with nothing in it, and a folder that
 // folds to nothing looks like an empty folder. So the shape is checked directly.
-import { buildTree } from '../src/treebuild.js';
+import { buildTree, sideOf } from '../src/treebuild.js';
 
 let failures = 0;
 const check = (name, fn) => {
@@ -100,6 +100,18 @@ check('the same folder reported twice is still one folder', () => {
   eq(names(root), ['a', 'b'], 'root');
   eq(at(root, 'a').dirs.length, 0, 'a has no folder of its own');
   eq(names(at(root, 'a')), ['x.js'], 'a holds the file that arrived');
+});
+
+check('an untracked row is discarded with git clean, not git checkout', () => {
+  // Untracked files sit in the Changes group with the tracked ones, so the
+  // group cannot say what discarding means. Reading the side off the group
+  // would offer `git checkout` for a file that is not in the index — which
+  // restores nothing, or errors, and either way is not deleting the file the
+  // `?` is promising.
+  eq(sideOf({ status: '?' }, 'unstaged'), 'untracked', 'an untracked row in Changes');
+  eq(sideOf({ status: 'M' }, 'unstaged'), 'unstaged', 'a tracked edit in Changes');
+  eq(sideOf({ status: '?' }, 'staged'), 'staged', 'a staged row is never cleaned');
+  eq(sideOf({ status: 'U' }, 'unstaged'), 'unstaged', 'a conflict is restored, not deleted');
 });
 
 process.stdout.write(failures === 0 ? '\nall tree checks passed\n' : `\n${failures} tree check(s) failed\n`);

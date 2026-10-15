@@ -273,10 +273,12 @@ try {
     assert.equal(body.repo.detached, false);
     assert.equal(body.clean, false);
     assert.deepEqual(body.staged.map(f => f.path), ['notes.md']);
-    assert.deepEqual(body.unstaged.map(f => f.path), ['app.ts']);
-    assert.deepEqual(body.untracked.map(f => f.path), ['added.txt']);
+    // Untracked files share the working tree group, told apart by their `?`,
+    // which is how VSCode shows them under its default settings.
+    assert.deepEqual(body.unstaged.map(f => f.path), ['app.ts', 'added.txt']);
+    assert.equal(body.untracked, undefined, 'there is no group of their own');
     assert.equal(body.staged[0].status, 'M');
-    assert.equal(body.untracked[0].status, '?');
+    assert.equal(body.unstaged[1].status, '?');
   });
 
   await check('status counts the lines each side changed', async () => {
@@ -866,7 +868,7 @@ await check('a staged picture previews like any other', async () => {
     // The files go in the repository root, not in a folder: an untracked
     // *directory* is now one entry rather than one entry per file, which is the
     // whole reason the status scan no longer says `--untracked-files=all`.
-    const before = (await call('/api/git.status', { sessionId: 's' })).body.counts.untracked.total;
+    const before = (await call('/api/git.status', { sessionId: 's' })).body.counts.unstaged.total;
     const written = [];
     try {
       for (let i = 0; i < 505; i += 1) {
@@ -875,11 +877,19 @@ await check('a staged picture previews like any other', async () => {
         writeFileSync(join(repo, name), `${i}\n`);
       }
       const status = (await call('/api/git.status', { sessionId: 's' })).body;
-      assert.equal(status.untracked.length, 500);
-      assert.equal(status.counts.untracked.listed, 500);
+      // The cap applies to the group the files now share, and its count covers
+      // the untracked ones too — otherwise the heading would disagree with the
+      // list printed under it.
+      assert.equal(status.unstaged.length, 500);
+      assert.equal(status.counts.unstaged.listed, 500);
+      assert.equal(
+        status.unstaged.filter(file => file.status === '?').length > 0,
+        true,
+        'the flooded files are in this group, marked untracked',
+      );
       // The fixture repo already holds untracked files of its own, so the claim
       // is about the delta and not about 505 being the whole repository.
-      assert.equal(status.counts.untracked.total, before + 505);
+      assert.equal(status.counts.unstaged.total, before + 505);
       assert.equal(status.truncated, true);
       // A group that was not capped must still be exact.
       assert.equal(status.counts.staged.total, status.staged.length);
@@ -894,7 +904,7 @@ await check('a staged picture previews like any other', async () => {
     writeFileSync(join(repo, 'bundle', 'deep', 'd.txt'), 'x\n');
     try {
       const status = (await call('/api/git.status', { sessionId: 's' })).body;
-      const rows = status.untracked.filter(file => file.path.startsWith('bundle'));
+      const rows = status.unstaged.filter(file => file.path.startsWith('bundle'));
       // Three hundred files, one row — and the row says it is a directory, so
       // the tree knows it has to go and ask rather than folding to nothing.
       assert.deepEqual(rows.map(file => file.path), ['bundle/']);
@@ -1006,11 +1016,11 @@ await check('a staged picture previews like any other', async () => {
       // offer a folder that expands to nothing. Editors reach the same
       // conclusion and drop it; it is reached as a project instead.
       const { body } = await call('/api/git.status', { sessionId: 's', repo: resolvePath(repo) });
-      const row = body.untracked.find(file => file.path === 'app-near/');
+      const row = body.unstaged.find(file => file.path === 'app-near/');
       assert.equal(row, undefined, 'the nested repository is not offered as a folder');
       assert.equal(
-        body.counts.untracked.total,
-        body.untracked.length,
+        body.counts.unstaged.total,
+        body.unstaged.length,
         'and it is not left in the count beside the entries that are shown',
       );
       assert.ok(
@@ -1029,7 +1039,7 @@ await check('a staged picture previews like any other', async () => {
       writeFileSync(join(plain, 'b.txt'), 'b\n');
       try {
         const { body } = await call('/api/git.status', { sessionId: 's', repo: resolvePath(repo) });
-        const row = body.untracked.find(file => file.path === 'plain-dir/');
+        const row = body.unstaged.find(file => file.path === 'plain-dir/');
         assert.ok(row, 'the plain directory is listed');
         assert.equal(row.dir, true, 'as a folder that can be opened');
 

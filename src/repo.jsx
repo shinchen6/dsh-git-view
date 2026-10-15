@@ -13,8 +13,11 @@ export function RepoBulkMenu({ status, run, confirm, busy }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
 
-  const unstaged = [...status.unstaged, ...status.conflicts];
-  const untracked = status.untracked;
+  // Untracked rows share the working tree list, so the two kinds are told apart by
+  // their `?` rather than by which list they came from.
+  const workingTree = [...status.unstaged, ...status.conflicts];
+  const untracked = workingTree.filter(file => file.status === '?');
+  const unstaged = workingTree.filter(file => file.status !== '?');
   const staged = status.staged;
   const count = (list, key) => t(key, { n: list.length });
 
