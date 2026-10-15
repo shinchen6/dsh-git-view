@@ -1,7 +1,8 @@
 // The tree is the one part of the panel whose failures are silent: a row that
 // does not appear looks like a repository with nothing in it, and a folder that
 // folds to nothing looks like an empty folder. So the shape is checked directly.
-import { buildTree, sideOf } from '../src/treebuild.js';
+import { readFileSync } from 'node:fs';
+import { buildTree, dirKey, sideOf } from '../src/treebuild.js';
 
 let failures = 0;
 const check = (name, fn) => {
@@ -100,6 +101,43 @@ check('the same folder reported twice is still one folder', () => {
   eq(names(root), ['a', 'b'], 'root');
   eq(at(root, 'a').dirs.length, 0, 'a has no folder of its own');
   eq(names(at(root, 'a')), ['x.js'], 'a holds the file that arrived');
+});
+
+// The two halves of folding a directory shut are written a long way from each
+// other: the view records the key when a directory should start closed, and the
+// tree reads it back to decide whether to skip the subtree. When they disagree
+// nothing throws and nothing looks broken — the folder simply comes up open, and
+// the panel lists files the Host never sent. That is what happened when the
+// untracked files moved into the Changes group and the writer kept the old
+// `untracked:` prefix, so the key is pinned here from both sides.
+check('a folded directory is recorded under the side it hangs from', () => {
+  eq(dirKey('unstaged', '.codebuddy'), 'unstaged:.codebuddy', 'an untracked directory in the Changes group');
+  eq(dirKey('staged', 't/api'), 'staged:t/api', 'a staged directory');
+
+  // The view writes the key for untracked directories, which now hang from the
+  // working tree. It must not be the prefix of a group that no longer exists.
+  eq(dirKey('unstaged', '.kiro').startsWith('untracked:'), false, 'no untracked: prefix survives the merge');
+
+  const collapsed = new Set([dirKey('unstaged', '.codebuddy')]);
+  eq(collapsed.has(dirKey('unstaged', '.codebuddy')), true, 'the tree finds the key the view wrote');
+});
+
+// Checking dirKey alone proved nothing: the defect was never in dirKey, it was
+// in a call site that stopped calling it and spelled the key by hand instead.
+// So the guard has to read the two files that must agree.
+check('neither half of the fold spells the key by hand', () => {
+  const tree = readFileSync(new URL('../src/tree.jsx', import.meta.url), 'utf8');
+  const view = readFileSync(new URL('../src/view.jsx', import.meta.url), 'utf8');
+
+  if (!tree.includes('dirKey(')) throw new Error('tree.jsx no longer folds through dirKey');
+  if (!view.includes('dirKey(')) throw new Error('view.jsx no longer folds through dirKey');
+
+  // A hand-written key in either file is the defect, whatever it happens to say.
+  const handWritten = [tree, view].filter(s => /`\$\{[^}]+\}:\$\{[^}]+\}`/.test(s));
+  if (handWritten.length > 0) throw new Error('a folder key is spelled out by hand instead of going through dirKey');
+
+  const stale = [tree, view].filter(s => /['"]untracked:/.test(s));
+  if (stale.length > 0) throw new Error("the 'untracked:' fold key is back; no group carries that name any more");
 });
 
 check('an untracked row is discarded with git clean, not git checkout', () => {

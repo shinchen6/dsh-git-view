@@ -1,7 +1,7 @@
 import { DirActions, GroupActions, RowActions } from './actions.jsx';
 import { useEffect } from 'react';
 
-import { buildTree, sideOf } from './treebuild.js';
+import { buildTree, dirKey, sideOf } from './treebuild.js';
 import { t } from './i18n.js';
 
 export { buildTree };
@@ -73,7 +73,7 @@ function sortNode(node) {
 function collectVisible(node, collapsed, side, into) {
   for (const file of node.files) into.push({ ...file, side: sideOf(file, side) });
   for (const dir of node.dirs) {
-    if (collapsed.has(`${side}:${dir.path}`)) continue;
+    if (collapsed.has(dirKey(side, dir.path))) continue;
     collectVisible(dir, collapsed, side, into);
   }
 }
@@ -147,7 +147,7 @@ function FileRow({ file, side, depth, selected, onSelect, actions, hover, checke
  * @returns {React.ReactElement} the row and, when open, its children.
  */
 function DirRow({ dir, side, depth, collapsed, onToggle, selected, onSelect, actions, hover, checked, onCheck, expand }) {
-  const key = `${side}:${dir.path}`;
+  const key = dirKey(side, dir.path);
   const open = !collapsed.has(key);
 
   // A directory the status scan reported without its contents: known to exist

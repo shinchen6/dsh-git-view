@@ -1,6 +1,21 @@
 /** Turning a flat status list into a folder tree. */
 
 /**
+ * The key a folded directory is recorded under.
+ *
+ * Two places have to agree on this spelling exactly: the tree, which skips a
+ * directory it finds here, and the view, which writes the key when a directory
+ * is folded shut. They used to spell it separately, and when the untracked files
+ * moved into the Changes group only the writer was updated — so every untracked
+ * folder came up expanded and the tree listed everything inside them without
+ * ever asking to.
+ * @param {string} side - the side the directory hangs from.
+ * @param {string} path - the directory's node path.
+ * @returns {string} the key.
+ */
+export const dirKey = (side, path) => `${side}:${path}`;
+
+/**
  * Which side of the working tree a row is discarded from.
  *
  * Untracked files share the Changes group with the tracked ones, so the group

@@ -10,7 +10,7 @@ import { t } from './i18n.js';
 import { BranchMenu, RemoteActions, RepoBulkMenu, StashMenu } from './repo.jsx';
 import { markChanges } from './marks.js';
 import { FileTree, visibleOrder } from './tree.jsx';
-import { sideOf } from './treebuild.js';
+import { dirKey, sideOf } from './treebuild.js';
 import { DiffSkeleton, FileSkeleton, LoadingAnnounce, TreeSkeleton, diffLoading, fileLoading, treeLoading } from './skeleton.jsx';
 import { CSS } from './styles.js';
 
@@ -413,6 +413,11 @@ export function GitView({ sessionId, useSessionStatus }) {
   // into these folders precisely so their contents would cost only the person
   // opening them, and a tree that opens everything on mount asks for all of it:
   // one request per untracked folder, the very scan this avoids.
+  //
+  // The key is `unstaged:<path>` because that is the side these directories now
+  // hang from. They used to be a group of their own keyed `untracked`, and
+  // leaving the old prefix here folded nothing at all: every untracked folder
+  // came up expanded and the tree listed everything inside them.
   useEffect(() => {
     const shut = (shown?.unstaged ?? [])
       .filter(file => file.dir === true && file.status === '?')
@@ -423,8 +428,9 @@ export function GitView({ sessionId, useSessionStatus }) {
       const next = new Set(current);
       let changed = false;
       for (const path of shut) {
-        if (!next.has(`untracked:${path}`)) {
-          next.add(`untracked:${path}`);
+        const key = dirKey('unstaged', path);
+        if (!next.has(key)) {
+          next.add(key);
           changed = true;
         }
       }
